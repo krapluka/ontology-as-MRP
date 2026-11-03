@@ -30,8 +30,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
-    "@graphql-codegen/cli": "^5.0.3",
-    "@graphql-codegen/client-preset": "^4.5.0",
+    "@graphql-codegen/cli": "^7.4.6",
+    "@graphql-codegen/client-preset": "^6.2.3",
     "@storybook/addon-a11y": "^9.0.0",
     "@storybook/addon-vitest": "^9.1.20",
     "@storybook/react-vite": "^9.0.0",
