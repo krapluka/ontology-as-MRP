@@ -37,7 +37,7 @@ http = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Parse the eval set's case files, on the YAML parser the data contract already uses.
-serde-saphyr = "1.3"
+serde-saphyr = "2.0"
 # Dyn-safe async impls of the CognitionProvider / Proposer seams.
 async-trait = "0.1"
 # The agent tool gateway: the official Rust MCP SDK, serving streamable HTTP as a Tower
