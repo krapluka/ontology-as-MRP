@@ -1,0 +1,19 @@
+[package]
+name = "odoo-client"
+description = "Shared Odoo JSON-RPC client (connect, execute_kw, read). Consumed by the seeder and the ingestion driver: one source of truth for the Odoo API surface."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+# No TLS: the client talks to a local Odoo over http://localhost, so ureq's default
+# rustls stack is left out to keep the dependency tree small. An https deployment
+# has to enable a TLS feature here, which brings webpki-roots back in.
+ureq = { version = "3.4", default-features = false, features = ["json"] }
+
+[lints]
+workspace = true

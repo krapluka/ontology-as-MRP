@@ -1,0 +1,36 @@
+id: joint-late-line-and-a-build-past-the-promise
+category: joint_plan
+profile: portfolio
+members:
+  - { model: sale.order, id: 1 }
+  - { model: mrp.production, id: 2 }
+coupling:
+  - Manufacturing order WH/MO/00002 builds what sales order S00001 promised.
+records:
+  - { model: sale.order, id: 1, fields: { name: S00001, commitment_date: "2027-03-16T00:00:00", order_line: "[10]" } }
+  - { model: sale.order.line, id: 10, fields: { product_id: "[100]", product_uom_qty: "10" } }
+  - { model: product.product, id: 100, fields: { name: Cargo Bike } }
+  - { model: product.product, id: 101, fields: { name: Battery Pack } }
+  - { model: mrp.bom, id: 20, fields: { product_id: "[100]", bom_line_ids: "[21]" } }
+  - { model: mrp.bom.line, id: 21, fields: { product_id: "[101]", product_qty: "1" } }
+  - { model: stock.quant, id: 30, fields: { product_id: "[101]", quantity: "0" } }
+  - { model: purchase.order.line, id: 40, fields: { product_id: "[101]", product_qty: "10", date_planned: "2027-04-09T08:00:00" } }
+  - { model: purchase.order, id: 41, fields: { name: P00041, order_line: "[40]", state: purchase } }
+  - { model: stock.picking, id: 42, fields: { scheduled_date: "2027-04-09T08:00:00", purchase_id: "[41]", state: assigned } }
+  - { model: mrp.production, id: 2, fields: { name: WH/MO/00002, origin: S00001, workorder_ids: "[2]", product_qty: "10", date_start: "2027-03-15T09:00:00", date_finished: "2027-03-17T13:00:00" } }
+  - { model: mrp.workcenter, id: 1, fields: { name: Assembly Line 1 } }
+  - { model: mrp.workcenter.capacity, id: 1, fields: { workcenter_id: "[1]", product_id: "[900]", capacity: "1" } }
+  - { model: mrp.workorder, id: 2, fields: { production_id: "[2]", workcenter_id: "[1]", date_start: "2027-03-15T09:00:00", date_finished: "2027-03-17T13:00:00", duration_expected: "240" } }
+expect:
+  outcome: plan
+  metrics:
+    members_at_risk: { at_most: 0 }
+reference:
+  actions:
+    - { action_type: expedite_po, target: { model: purchase.order.line, id: 40 }, params: { new_date: "2027-03-12 08:00:00" } }
+    - { action_type: re_promise_date, target: { model: sale.order, id: 1 }, params: { new_date: "2027-03-18 00:00:00" } }
+notes: >
+  The records decide the sales order: its only inbound line arrives after the promise. They do not
+  decide its build, which is planned to finish after the promise with no cause node for an agent to
+  be told. So one member comes from the semantic layer and the other from an investigator, and a
+  plan has to act on both.

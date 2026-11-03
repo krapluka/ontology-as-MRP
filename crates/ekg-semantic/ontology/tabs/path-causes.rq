@@ -1,0 +1,56 @@
+# Tab input: the selected point's cause-dependent path candidates. Run only for a non-empty
+# cause set (an empty VALUES block would return nothing and erase the chain).
+# `<urn:ekg:subject>` and the `{{CAUSES}}` list are replaced only with IRIs
+# `ontology::canonical_subject` rebuilt (the cause components come from the rule's own rows).
+#
+#   line:  every open inbound line (the shared definition) of a cause component, whatever the
+#          vendor (the rule counts them all): its purchase order, the PO's vendor, the arrival,
+#          and ?late, whether it arrives after the subject's commitment (inbound the rule
+#          could not count);
+#   link:  every sourcing link of a cause component: its supplier and `sequence`;
+#   route: every BOM step on the way from the subject's ordered products down to a cause
+#          component at any depth: ?parent is produced by ?bom, one of whose lines uses ?child,
+#          and ?child is (or leads to) the cause. A cause inside a sub-assembly's BOM is then
+#          drawn as one lit path (ordered product, BOM, sub-assembly, its BOM, component)
+#          instead of two lit halves with a gap.
+#
+# `ekg_semantic::tabs` picks one component, PO and supplier from these deterministically, and
+# lights the route steps that lead from the path's ordered product to that component.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?hop ?cause ?po ?vendor ?arrival ?late ?supplier ?sequence ?parent ?bom ?child
+WHERE {
+    {
+        {{OPEN_INBOUND}}
+        BIND("line" AS ?hop)
+        BIND(?ib_product AS ?cause)
+        BIND(?ib_po AS ?po)
+        BIND(?ib_arrival AS ?arrival)
+        OPTIONAL { ?ib_po ekg:from_supplier ?vendor }
+        OPTIONAL { <urn:ekg:subject> ekg:commitment_date ?commitment }
+        BIND(COALESCE(?arrival > ?commitment, false) AS ?late)
+    }
+    UNION
+    {
+        BIND("link" AS ?hop)
+        ?link a ekg:SupplierLink ;
+              ekg:supplies_product ?cause ;
+              ekg:supplied_by      ?supplier .
+        OPTIONAL { ?link ekg:sequence ?sequence }
+    }
+    UNION
+    {
+        BIND("route" AS ?hop)
+        <urn:ekg:subject> ekg:has_line_of ?routeLine .
+        ?routeLine ekg:line_product ?routeTop .
+        ?routeTop (^ekg:produces_product/ekg:has_line/ekg:component_product)* ?parent .
+        ?bom a ekg:BOM ;
+             ekg:produces_product ?parent ;
+             ekg:has_line         ?bomLine .
+        ?bomLine ekg:component_product ?child .
+        ?child (^ekg:produces_product/ekg:has_line/ekg:component_product)* ?cause .
+    }
+    VALUES ?cause { {{CAUSES}} }
+}
+ORDER BY ?hop ?cause ?arrival ?po ?supplier ?parent ?bom ?child

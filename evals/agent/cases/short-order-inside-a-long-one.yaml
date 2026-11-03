@@ -1,0 +1,24 @@
+id: short-order-inside-a-long-one
+category: capacity_shortfall
+profile: process
+subject: { model: mrp.production, id: 2 }
+records:
+  - { model: sale.order, id: 42, fields: { name: S00042, commitment_date: "2027-03-18T00:00:00" } }
+  - { model: mrp.production, id: 1, fields: { name: WH/MO/00001, workorder_ids: "[1]" } }
+  - { model: mrp.production, id: 2, fields: { name: WH/MO/00002, origin: S00042, workorder_ids: "[2]", product_qty: "40", date_start: "2027-03-15T09:00:00", date_finished: "2027-03-15T13:00:00" } }
+  - { model: mrp.workcenter, id: 1, fields: { name: Assembly Line 1 } }
+  - { model: mrp.workcenter.capacity, id: 1, fields: { workcenter_id: "[1]", product_id: "[900]", capacity: "1" } }
+  - { model: mrp.workorder, id: 1, fields: { production_id: "[1]", workcenter_id: "[1]", date_start: "2027-03-15T06:00:00", date_finished: "2027-03-16T18:00:00", duration_expected: "2160" } }
+  - { model: mrp.workorder, id: 2, fields: { production_id: "[2]", workcenter_id: "[1]", date_start: "2027-03-15T09:00:00", date_finished: "2027-03-15T13:00:00", duration_expected: "240" } }
+expect:
+  outcome: plan
+  metrics:
+    risk_left: { at_most: 0 }
+reference:
+  actions:
+    - { action_type: raise_work_center_capacity, target: { model: mrp.workcenter.capacity, id: 1 }, params: { new_capacity: "2" } }
+notes: >
+  Work order 1 holds the work centre from 15 March 06:00 to 16 March 18:00, and work order 2
+  (four hours on 15 March) falls inside that window. Order 2 is promised for 18 March. Running
+  both at once needs a capacity of two; moving work order 2 behind work order 1 also clears
+  the overlap. Any plan that leaves no work order over capacity passes.

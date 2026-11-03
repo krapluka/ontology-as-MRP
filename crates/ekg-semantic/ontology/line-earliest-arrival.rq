@@ -1,0 +1,21 @@
+# Input to the plan check on promises: the earliest a purchase-order line can arrive, the date its
+# supplier committed to. A confirmed order plus the supplier's lead time for the line's product
+# (the shortest, when a supplier has several links) gives that date. A line planned later has
+# slipped, and an expedite can pull it back that far. A line with no confirmation date or no
+# supplier link yields no row: nothing is known about how far it can move.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?line (MIN(?arrival) AS ?earliest)
+WHERE {
+    ?po ekg:has_po_line   ?line ;
+        ekg:from_supplier ?supplier ;
+        ekg:approved_at   ?approved .
+    ?line ekg:po_line_product ?product .
+    ?link ekg:supplies_product ?product ;
+          ekg:supplied_by      ?supplier ;
+          ekg:delay            ?delay .
+    BIND(?approved + STRDT(CONCAT("P", STR(?delay), "D"), xsd:dayTimeDuration) AS ?arrival)
+}
+GROUP BY ?line

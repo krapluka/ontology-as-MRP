@@ -1,0 +1,894 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ekg-backend API",
+    "description": "The governed /api surface. Writes are classic REST commands (this document): the Odoo ingestion webhook and human oversight of action points (list / read / promote / abort / undo) and of portfolios (promote / undo / abort, each one governed step across every member). Reads are served by the separate read-only GraphQL surface at POST /api/graphql, which defines no mutation root: every governed mutation stays an explicit REST command here. Plus operational liveness + readiness.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/action-points": {
+      "get": {
+        "tags": [
+          "action-points"
+        ],
+        "summary": "`GET /api/action-points`: lists every action point from Restate state introspection\n(durable state, authoritative for display).",
+        "description": "# Errors\n[`Problem`] (502) if the Restate admin introspection is unreachable or malformed.",
+        "operationId": "list_action_points",
+        "responses": {
+          "200": {
+            "description": "Every action point (durable state)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Restate admin unreachable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/action-points/abort": {
+      "post": {
+        "tags": [
+          "action-points"
+        ],
+        "summary": "`POST /api/action-points/abort`: the stop control (`open` or `proposed` to `aborted`),\nno write-back. The abort claims the point, then records.",
+        "description": "# Errors\n[`Problem`] (422) if the reviewer or reason is empty or the reviewer is a `policy:`\nidentity; (404) if no point exists; (409) if the point cannot be aborted from its\ncurrent state or another command holds it; (502) if the Restate ingress is unreachable.",
+        "operationId": "abort_action_point",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbortInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Aborted via the stop control; no write-back"
+          },
+          "404": {
+            "description": "No action point for that subject",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Point cannot be aborted from its current state, or another command is in progress on it",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing oversight evidence: an empty reviewer or reason, or a policy: reviewer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Restate ingress unreachable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/action-points/one": {
+      "get": {
+        "tags": [
+          "action-points"
+        ],
+        "summary": "`GET /api/action-points/one?subject=<iri>`: one point, with the proposal and the\nomissions the reviewer has to see.",
+        "description": "# Errors\n[`Problem`] (404) if no point exists for the subject; (502) if the Restate ingress\nis unreachable or returns an undecodable point.",
+        "operationId": "get_action_point",
+        "parameters": [
+          {
+            "name": "subject",
+            "in": "query",
+            "description": "The subject entity IRI (the point key)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The action point for the subject",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No action point for that subject",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Restate ingress unreachable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/action-points/promote": {
+      "post": {
+        "tags": [
+          "action-points"
+        ],
+        "summary": "`POST /api/action-points/promote`: the governed write-back. Only a `proposed` point can\nbe promoted: the command validates its evidence, claims the point, runs the write-back\nin-process and records it durably (`proposed`, then `under_review`, then `promoted`).",
+        "description": "# Errors\n[`Problem`] (422) if the reviewer or rationale is empty or the reviewer is a `policy:`\nidentity; (404) if no point exists; (409) if it is not `proposed`, another command holds\nit, or the selected option is missing or stale; (502) if the governed write-back or the\ndurable record fails.",
+        "operationId": "promote_action_point",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Promoted; governed write-back committed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No action point for that subject",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Point is not proposed, another command is in progress on it, or (with a slate) the selected option_rank_key is missing, unknown/stale, or the slate has no promotable option",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing oversight evidence: an empty reviewer or rationale, or a policy: reviewer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Governed write-back or ingress failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/action-points/undo": {
+      "post": {
+        "tags": [
+          "action-points"
+        ],
+        "summary": "`POST /api/action-points/undo`: reverse an auto-applied change, or a plan a human approved\non this point alone, within its reversal window. Only a `promoted` point can be undone:\nthe undo claims the point, runs the governed inverse write-back (the reversible\n`OdooActionExecutor` path the plan was committed on) and records it durably\n(`promoted` to `reversed`). An undo requested after the window has closed is refused with\nan explicit reason.",
+        "description": "# Errors\n[`Problem`] (422) if the reviewer or reason is empty or the reviewer is a `policy:`\nidentity; (404) if no point exists; (409) if it is not `promoted`, was promoted through its\nportfolio (undo the portfolio instead), has no executed plan, the reversal window has closed\n(or no applied time is recorded), or another command holds it; (502) if the governed\nreverse or the durable record fails.",
+        "operationId": "undo_action_point",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndoInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reversed; governed inverse write-back committed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No action point for that subject",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Point is not promoted, was promoted through its portfolio (undo the portfolio), has no plan, the window closed, or another command is in progress on it",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing oversight evidence: an empty reviewer or reason, or a policy: reviewer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Governed reverse or ingress failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "`GET /api/health`: liveness. Always `200` while the process serves.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The process is up and serving",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/odoo": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "The webhook handler: authenticate and scope-check, then submit the parsed ref to\nthe durable worker via the Restate ingress. Rejections return without pulling,\nsubmitting or writing anything. A submit that cannot reach Restate answers 503;\nthe reconciliation sweep is the backstop.",
+        "operationId": "ingest_odoo",
+        "parameters": [
+          {
+            "name": "x-ekg-webhook-secret",
+            "in": "header",
+            "description": "Shared webhook secret",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OdooNotification"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; submitted to the durable ingest worker"
+          },
+          "401": {
+            "description": "Missing or invalid webhook secret"
+          },
+          "403": {
+            "description": "Model outside the ingestion allowlist"
+          },
+          "503": {
+            "description": "Restate ingress unreachable (the sweep backstops)"
+          }
+        }
+      }
+    },
+    "/api/portfolios/abort": {
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "`POST /api/portfolios/abort`: dismiss an active portfolio's plan as one governed step:\nclaim every member, record the portfolio dismissed, then abort each member. Writes nothing\nto any system of record.",
+        "description": "# Errors\n[`Problem`] (422) for missing oversight evidence; (404) for an unknown portfolio; (409)\nwhen the portfolio is not active, the generation is stale, or a member is held by another\ncommand, changing nothing; (502) when a member's abort does not record after the portfolio\nwas dismissed (its claim is held; a retry aborts only the members still awaiting).",
+        "operationId": "abort_portfolio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioAbortInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Dismissed; every member aborted. The portfolio record",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No such portfolio",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The portfolio is not active, the generation is stale, or another command is in progress on a member; nothing is changed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing oversight evidence: an empty reviewer or reason, or a policy: reviewer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A member's abort did not record after the dismissal (a retry aborts only the members still awaiting) or an ingress failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/promote": {
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "`POST /api/portfolios/promote`: promote one option of a portfolio's joint slate as one\ngoverned step across every member: claim every member, run one all-or-nothing\nwrite-back, record the portfolio's promotion and then each member's.",
+        "description": "# Errors\n[`Problem`] (422) for missing oversight evidence; (404) for an unknown portfolio; (409)\nwhen the portfolio is not active, the generation is stale, it has no joint slate for it,\nthe option is not on it, or a member is not proposed or is held by another command,\nwriting nothing; (502) if the write-back or a durable record fails.",
+        "operationId": "promote_portfolio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioPromoteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Promoted across every member; the portfolio record",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No such portfolio",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The portfolio is not active, the generation is stale, it has no joint slate for that generation, the option is not on it, or a member is not proposed or another command is in progress on it; nothing is written",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing oversight evidence: an empty reviewer or rationale, or a policy: reviewer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Governed write-back or ingress failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/portfolios/undo": {
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "`POST /api/portfolios/undo`: undo a promoted portfolio's plan as one governed step,\nwithin the reversal window: claim every member, reverse what is left of the executed plan\nand record every member and the portfolio reversed or record the progress and answer\n502 naming what remains.",
+        "description": "# Errors\n[`Problem`] (422) for missing oversight evidence; (404) for an unknown portfolio; (409)\nwhen it is not promoted, its window closed, or a member is held by another command,\nreversing nothing; (502) if the reverse is partial (naming how many actions remain) or a\ndurable record fails.",
+        "operationId": "undo_portfolio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioUndoInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reversed across every member; the portfolio record",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "No such portfolio",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The portfolio is not promoted, its reversal window closed, or another command is in progress on a member; nothing is reversed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing oversight evidence: an empty reviewer or reason, or a policy: reviewer",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The reverse was partial (the reason states how many actions remain; a later undo resumes) or an ingress failure",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ready": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "`GET /api/ready`: readiness. Probes each hard dependency concurrently and answers `200`\n(all reachable) or `503` (any unreachable).",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "Every hard dependency is reachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessStatus"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A hard dependency is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AbortInput": {
+        "type": "object",
+        "description": "Abort a point via the stop control.",
+        "required": [
+          "subject",
+          "reviewer",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Their reason, recorded in the audit trail. Required and non-empty."
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "The reviewer invoking the stop control. Non-empty, and never a `policy:` identity."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject entity IRI."
+          }
+        }
+      },
+      "HealthStatus": {
+        "type": "object",
+        "description": "Liveness body: the process is up and serving.",
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "The service name (`ekg-backend`)."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `ok` while the process serves."
+          }
+        }
+      },
+      "OdooNotification": {
+        "type": "object",
+        "description": "Odoo's thin automation-rule notification payload.",
+        "required": [
+          "_model",
+          "_id"
+        ],
+        "properties": {
+          "_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The changed record's id."
+          },
+          "_model": {
+            "type": "string",
+            "description": "The changed record's model, e.g. `sale.order`."
+          }
+        }
+      },
+      "PortfolioAbortInput": {
+        "type": "object",
+        "description": "Dismiss an active portfolio's plan: abort every member, write nothing to Odoo.",
+        "required": [
+          "portfolio",
+          "generation",
+          "reviewer",
+          "reason"
+        ],
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The generation the reviewer saw; it must be the portfolio's current one.",
+            "minimum": 0
+          },
+          "portfolio": {
+            "type": "string",
+            "description": "The portfolio id (`portfolio/<id>`)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Their reason, recorded in the audit trail. Required and non-empty."
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "The reviewer dismissing (identity; no auth yet). Non-empty, and never a `policy:`\nidentity."
+          }
+        }
+      },
+      "PortfolioPromoteInput": {
+        "type": "object",
+        "description": "Promote one option of a portfolio's joint slate across every member.",
+        "required": [
+          "portfolio",
+          "generation",
+          "option_rank_key",
+          "reviewer",
+          "rationale"
+        ],
+        "properties": {
+          "context_seen": {
+            "type": "string",
+            "description": "A record of the context the reviewer was shown."
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The generation the reviewer decided for; it must be the portfolio's current one.",
+            "minimum": 0
+          },
+          "option_rank_key": {
+            "type": "string",
+            "description": "The `rank_key` of the joint-slate option the reviewer selected. Opaque ordering id,\nnever a capability or metric name."
+          },
+          "portfolio": {
+            "type": "string",
+            "description": "The portfolio id (`portfolio/<id>`)."
+          },
+          "rationale": {
+            "type": "string",
+            "description": "The reviewer's rationale (non-rubber-stamping). Non-empty."
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "The reviewer promoting (identity; no auth yet). Non-empty, and never a `policy:`\nidentity."
+          }
+        }
+      },
+      "PortfolioUndoInput": {
+        "type": "object",
+        "description": "Undo a promoted portfolio within its reversal window.",
+        "required": [
+          "portfolio",
+          "reviewer",
+          "reason"
+        ],
+        "properties": {
+          "portfolio": {
+            "type": "string",
+            "description": "The portfolio id (`portfolio/<id>`)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Their reason, recorded in the audit trail. Required and non-empty."
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "The reviewer requesting the undo. Non-empty, and never a `policy:` identity."
+          }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "An RFC-7807 error body. Serialized as `application/problem+json`.",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "A human-readable explanation specific to this occurrence."
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The HTTP status code.",
+            "minimum": 0
+          },
+          "title": {
+            "type": "string",
+            "description": "A short, human-readable summary."
+          },
+          "type": {
+            "type": "string",
+            "description": "A URI reference identifying the problem type (`about:blank` for generic)."
+          }
+        }
+      },
+      "PromoteInput": {
+        "type": "object",
+        "description": "Promote a proposed point: who, why, and what they saw.",
+        "required": [
+          "subject",
+          "reviewer",
+          "rationale"
+        ],
+        "properties": {
+          "context_seen": {
+            "type": "string",
+            "description": "A record of the context the reviewer was shown."
+          },
+          "option_rank_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `rank_key` of the slate option the reviewer selected. Required when the point\ncarries a slate (the promotion commits that option's plan; an unknown/stale key is\nrefused). Ignored when the point has no slate: the staged proposal is promoted.\nAn opaque ordering id, never a capability or metric name."
+          },
+          "rationale": {
+            "type": "string",
+            "description": "The reviewer's rationale (non-rubber-stamping). Non-empty."
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "The reviewer promoting (identity; no auth yet). Non-empty, and never a `policy:`\nidentity (reserved for the auto-apply policy)."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject entity IRI (the action point's key)."
+          }
+        }
+      },
+      "ReadinessStatus": {
+        "type": "object",
+        "description": "Readiness body: the aggregate verdict plus a per-dependency reachability map.",
+        "required": [
+          "status",
+          "dependencies"
+        ],
+        "properties": {
+          "dependencies": {
+            "type": "object",
+            "description": "Per-dependency reachability (`ok` or `unreachable`), keyed by name.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "description": "`ready` when every dependency is reachable, else `not_ready`."
+          }
+        }
+      },
+      "UndoInput": {
+        "type": "object",
+        "description": "Undo an auto-applied change within its reversal window.",
+        "required": [
+          "subject",
+          "reviewer",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Their reason, recorded in the audit trail. Required and non-empty."
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "The reviewer requesting the undo (identity; no auth yet). Non-empty, and never a\n`policy:` identity."
+          },
+          "subject": {
+            "type": "string",
+            "description": "The subject entity IRI (the action point's key)."
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "ingest",
+      "description": "Governed source ingestion"
+    },
+    {
+      "name": "action-points",
+      "description": "Human oversight: list / read / promote / abort"
+    },
+    {
+      "name": "portfolios",
+      "description": "Human oversight of portfolios: promote / undo / dismiss a joint plan as one governed step"
+    },
+    {
+      "name": "meta",
+      "description": "Operational: liveness + readiness"
+    }
+  ]
+}

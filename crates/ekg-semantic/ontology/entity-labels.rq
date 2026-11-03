@@ -1,0 +1,25 @@
+# Display input: the materialized names each asked-about entity is labelled from. That is its
+# own name; for an order line its order, quantities and product; for a sales order its
+# customer; for a work order its manufacturing order, operation and work center; for a capacity
+# record its work center and product. `ekg_semantic::display` composes the label by the
+# entity's model. The `VALUES` block's marker is replaced only with IRIs rebuilt by
+# `ontology::canonical_subject`.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?s ?name ?poName ?qty ?received ?productName ?customerName ?moName ?opName ?wcName
+       ?capWcName ?capProductName
+WHERE {
+    VALUES ?s { {{SUBJECTS}} }
+    OPTIONAL { ?s ekg:name ?name }
+    OPTIONAL { ?po ekg:has_po_line ?s ; ekg:name ?poName }
+    OPTIONAL { ?s ekg:product_qty ?qty }
+    OPTIONAL { ?s ekg:qty_received ?received }
+    OPTIONAL { ?s ekg:po_line_product ?p . ?p ekg:name ?productName }
+    OPTIONAL { ?s ekg:for_customer ?c . ?c ekg:name ?customerName }
+    OPTIONAL { ?s ekg:part_of ?mo . ?mo ekg:name ?moName }
+    OPTIONAL { ?s ekg:realizes ?op . ?op ekg:name ?opName }
+    OPTIONAL { ?s ekg:performedBy ?wc . ?wc ekg:name ?wcName }
+    OPTIONAL { ?s ekg:capacity_of ?capWc . ?capWc ekg:name ?capWcName }
+    OPTIONAL { ?s ekg:capacity_for ?capP . ?capP ekg:name ?capProductName }
+}

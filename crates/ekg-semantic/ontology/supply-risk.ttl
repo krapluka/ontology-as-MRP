@@ -1,0 +1,609 @@
+#
+# Supply-risk ontology: an OWL projection of Odoo's MRP model.
+#
+# Hand-written Turtle, the source of truth for the supply-risk capability's
+# vocabulary. `ekg:` classes mirror the Odoo models the delivery-promise agent
+# traverses; datatype properties mirror Odoo's own planning fields (snake_case,
+# field-to-property), so the rule reads the customer's planning data rather than
+# invented thresholds.
+#
+# Traversal projected here:
+#   sale.order -> sale.order.line -> product -> mrp.bom -> mrp.bom.line (component)
+#   -> product.supplierinfo (supplier + lead time) -> purchase.order.line (inbound)
+#   -> stock.quant (on-hand) / stock.warehouse.orderpoint (safety stock)
+#
+# IRI scheme (matches `ekg-domain::ids`):
+#   vocabulary  https://ekg.example/ontology#            (this file, prefix ekg:)
+#   entities    https://ekg.example/id/{model}/{id}      (one per source record)
+#   named graph https://ekg.example/graph/{model}/{id}   (one per entity)
+#
+# Reasoning: loaded into a GraphDB repository with the `rdfsplus-optimized`
+# ruleset; class/property hierarchies below are RDFS/OWL-Lite so they materialize
+# under that ruleset without requiring full OWL-DL.
+
+@prefix ekg:  <https://ekg.example/ontology#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://ekg.example/ontology>
+    a owl:Ontology ;
+    rdfs:label "EKG Supply-Risk Ontology" ;
+    rdfs:comment "OWL projection of Odoo's MRP model for the delivery-promise & supply-risk capability." ;
+    owl:versionInfo "0.1.0" .
+
+# --- Neutral core (governance base + process metamodel) ---
+# ekg:GovernedEntity, the ekg:SourceRecord provenance vocabulary and the PROV-aligned
+# process metamodel (ekg:Activity/Agent/Artifact/ProcessState and verbs) live in
+# `ekg-core.ttl`, which is loaded into its own ontology graph and shared by every
+# capability. This file specialises those classes for supply risk and manufacturing.
+
+# --- Parties ---
+# A res.partner takes on the ekg:Supplier and/or ekg:Customer role from its
+# supplier_rank / customer_rank (role by rank, not a frozen enum).
+# Both roles are subclasses of ekg:Party so a partner can be typed as both.
+
+ekg:Party
+    a owl:Class ;
+    rdfs:label "Party" ;
+    rdfs:comment "A business partner (Odoo res.partner). Specialised into Supplier/Customer roles by rank." .
+
+ekg:Supplier
+    a owl:Class ;
+    rdfs:subClassOf ekg:Party ;
+    rdfs:label "Supplier" ;
+    rdfs:comment "A party with supplier_rank > 0." .
+
+ekg:Customer
+    a owl:Class ;
+    rdfs:subClassOf ekg:Party ;
+    rdfs:label "Customer" ;
+    rdfs:comment "A party with customer_rank > 0." .
+
+ekg:supplier_rank
+    a owl:DatatypeProperty ;
+    rdfs:label "supplier rank" ;
+    rdfs:domain ekg:Party ;
+    rdfs:range xsd:integer .
+
+ekg:customer_rank
+    a owl:DatatypeProperty ;
+    rdfs:label "customer rank" ;
+    rdfs:domain ekg:Party ;
+    rdfs:range xsd:integer .
+
+# --- Products ---
+
+ekg:Product
+    a owl:Class ;
+    rdfs:subClassOf ekg:Artifact ;
+    rdfs:label "Product" ;
+    rdfs:comment "A product variant (Odoo product.product). Finished goods, sub-assemblies and purchased components are all products. An ekg:Artifact: the object manufacturing activities consume (ekg:used) and produce (ekg:produced)." .
+
+ekg:default_code
+    a owl:DatatypeProperty ;
+    rdfs:label "internal reference" ;
+    rdfs:comment "Odoo default_code, the internal product reference." ;
+    rdfs:domain ekg:Product ;
+    rdfs:range xsd:string .
+
+ekg:name
+    a owl:DatatypeProperty ;
+    rdfs:label "name" ;
+    rdfs:range xsd:string .
+
+# --- Bill of materials ---
+# Multi-level BOM: a BOM produces a product and has lines; a line's component is
+# itself a product that may have its own BOM (E-Bike, then Drive, then Motor).
+
+ekg:BOM
+    a owl:Class ;
+    rdfs:label "Bill of Materials" ;
+    rdfs:comment "A manufacturing BOM (Odoo mrp.bom)." .
+
+ekg:BomLine
+    a owl:Class ;
+    rdfs:label "BOM Line" ;
+    rdfs:comment "One component requirement of a BOM (Odoo mrp.bom.line)." .
+
+ekg:produces_product
+    a owl:ObjectProperty ;
+    rdfs:label "produces product" ;
+    rdfs:comment "The product this BOM builds (mrp.bom.product_tmpl_id → its variant)." ;
+    rdfs:domain ekg:BOM ;
+    rdfs:range ekg:Product .
+
+ekg:has_line
+    a owl:ObjectProperty ;
+    rdfs:label "has line" ;
+    rdfs:comment "A line of this BOM." ;
+    rdfs:domain ekg:BOM ;
+    rdfs:range ekg:BomLine .
+
+ekg:component_product
+    a owl:ObjectProperty ;
+    rdfs:label "component product" ;
+    rdfs:comment "The product consumed by this BOM line (mrp.bom.line.product_id)." ;
+    rdfs:domain ekg:BomLine ;
+    rdfs:range ekg:Product .
+
+ekg:produce_delay
+    a owl:DatatypeProperty ;
+    rdfs:label "produce delay" ;
+    rdfs:comment "Manufacturing lead time in days (mrp.bom.produce_delay)." ;
+    rdfs:domain ekg:BOM ;
+    rdfs:range xsd:integer .
+
+ekg:product_qty
+    a owl:DatatypeProperty ;
+    rdfs:label "quantity" ;
+    rdfs:comment "A quantity of product (mrp.bom.line.product_qty, purchase.order.line.product_qty). Snake_case mirrors the Odoo field shared across models." ;
+    rdfs:range xsd:decimal .
+
+# --- Suppliers & lead time ---
+
+ekg:SupplierLink
+    a owl:Class ;
+    rdfs:label "Supplier Link" ;
+    rdfs:comment "A product↔supplier sourcing record (Odoo product.supplierinfo). More than one link for a product ⇒ multi-sourced." .
+
+ekg:supplies_product
+    a owl:ObjectProperty ;
+    rdfs:label "supplies product" ;
+    rdfs:domain ekg:SupplierLink ;
+    rdfs:range ekg:Product .
+
+ekg:supplied_by
+    a owl:ObjectProperty ;
+    rdfs:label "supplied by" ;
+    rdfs:domain ekg:SupplierLink ;
+    rdfs:range ekg:Supplier .
+
+ekg:delay
+    a owl:DatatypeProperty ;
+    rdfs:label "lead time" ;
+    rdfs:comment "Supplier lead time in days (product.supplierinfo.delay), a load-bearing planning field." ;
+    rdfs:domain ekg:SupplierLink ;
+    rdfs:range xsd:integer .
+
+ekg:min_qty
+    a owl:DatatypeProperty ;
+    rdfs:label "minimum order quantity" ;
+    rdfs:comment "Minimum purchasable quantity (product.supplierinfo.min_qty)." ;
+    rdfs:domain ekg:SupplierLink ;
+    rdfs:range xsd:decimal .
+
+ekg:sequence
+    a owl:DatatypeProperty ;
+    rdfs:label "sequence" ;
+    rdfs:comment "Source preference (lower = preferred). product.supplierinfo.sequence." ;
+    rdfs:domain ekg:SupplierLink ;
+    rdfs:range xsd:integer .
+
+# --- Purchase orders ---
+
+ekg:PurchaseOrder
+    a owl:Class ;
+    rdfs:label "Purchase Order" ;
+    rdfs:comment "An inbound purchase order (Odoo purchase.order)." .
+
+ekg:PurchaseOrderLine
+    a owl:Class ;
+    rdfs:label "Purchase Order Line" ;
+    rdfs:comment "One inbound line: a quantity of a product with an expected receipt date (Odoo purchase.order.line)." .
+
+ekg:from_supplier
+    a owl:ObjectProperty ;
+    rdfs:label "from supplier" ;
+    rdfs:domain ekg:PurchaseOrder ;
+    rdfs:range ekg:Supplier .
+
+ekg:has_po_line
+    a owl:ObjectProperty ;
+    rdfs:label "has purchase order line" ;
+    rdfs:domain ekg:PurchaseOrder ;
+    rdfs:range ekg:PurchaseOrderLine .
+
+ekg:po_line_product
+    a owl:ObjectProperty ;
+    rdfs:label "purchase order line product" ;
+    rdfs:comment "The product being received (purchase.order.line.product_id)." ;
+    rdfs:domain ekg:PurchaseOrderLine ;
+    rdfs:range ekg:Product .
+
+ekg:approved_at
+    a owl:DatatypeProperty ;
+    rdfs:label "confirmed at" ;
+    rdfs:comment "When the buyer confirmed the order (purchase.order.date_approve), the start of the supplier's lead time." ;
+    rdfs:domain ekg:PurchaseOrder ;
+    rdfs:range xsd:dateTime .
+
+ekg:date_planned
+    a owl:DatatypeProperty ;
+    rdfs:label "expected receipt date" ;
+    rdfs:comment "When the inbound line is expected to be received (purchase.order.line.date_planned), the load-bearing arrival date compared against the promise." ;
+    rdfs:domain ekg:PurchaseOrderLine ;
+    rdfs:range xsd:dateTime .
+
+ekg:qty_received
+    a owl:DatatypeProperty ;
+    rdfs:label "quantity received" ;
+    rdfs:comment "How much of the line has already been received (purchase.order.line.qty_received). Received units are in on-hand stock, so only the line's open quantity (product_qty − qty_received) is still inbound." ;
+    rdfs:domain ekg:PurchaseOrderLine ;
+    rdfs:range xsd:decimal .
+
+ekg:unit_price
+    a owl:DatatypeProperty ;
+    rdfs:label "unit price" ;
+    rdfs:comment "The line's unit price (purchase.order.line.price_unit), the monetary value the auto-apply cost predicate sums per plan. Sensitive: the read-policy hides it from a non-procurement grounding, while the deterministic promotion policy reads it directly." ;
+    rdfs:domain ekg:PurchaseOrderLine ;
+    rdfs:range xsd:decimal .
+
+# --- Inbound transport ---
+
+ekg:Shipment
+    a owl:Class ;
+    rdfs:label "Shipment" ;
+    rdfs:comment "An inbound transport shipment fulfilling a purchase order (Odoo stock.picking, incoming). Carries the logistics ETA the risk rule uses in place of the purchase-order-line's planned date when present." .
+
+ekg:delivers
+    a owl:ObjectProperty ;
+    rdfs:label "delivers" ;
+    rdfs:comment "The inbound purchase order this shipment fulfils (stock.picking.purchase_id)." ;
+    rdfs:domain ekg:Shipment ;
+    rdfs:range ekg:PurchaseOrder .
+
+ekg:eta
+    a owl:DatatypeProperty ;
+    rdfs:label "estimated time of arrival" ;
+    rdfs:comment "The shipment's estimated arrival (stock.picking.scheduled_date), the load-bearing logistics signal compared against the promise; a slip past the commitment drops the inbound from on-time availability." ;
+    rdfs:domain ekg:Shipment ;
+    rdfs:range xsd:dateTime .
+
+ekg:completed_at
+    a owl:DatatypeProperty ;
+    rdfs:label "receipt completion time" ;
+    rdfs:comment "The shipment's actual receipt completion (stock.picking.date_done), the authoritative delivered-on date, distinct from the scheduled ekg:eta. Supplier on-time delivery compares its DAY with the delivered purchase order's planned day (the latest ekg:date_planned over its lines, the date agreed with the supplier, not the shipment's moving ETA): on or before it is on time. Absent until the receipt is done." ;
+    rdfs:domain ekg:Shipment ;
+    rdfs:range xsd:dateTime .
+
+ekg:transport_status
+    a owl:DatatypeProperty ;
+    rdfs:label "transport status" ;
+    rdfs:comment "Descriptive carrier/transport status (e.g. in_transit, delayed). Not risk-bearing; the ETA is." ;
+    rdfs:domain ekg:Shipment ;
+    rdfs:range xsd:string .
+
+ekg:last_position
+    a owl:DatatypeProperty ;
+    rdfs:label "last known position" ;
+    rdfs:comment "Descriptive last reported position of the shipment (free text / simulated). Not risk-bearing." ;
+    rdfs:domain ekg:Shipment ;
+    rdfs:range xsd:string .
+
+ekg:geofence
+    a owl:DatatypeProperty ;
+    rdfs:label "geofence" ;
+    rdfs:comment "Descriptive geofence zone the shipment last reported in (free text / simulated). Not risk-bearing." ;
+    rdfs:domain ekg:Shipment ;
+    rdfs:range xsd:string .
+
+# --- Stock on hand & safety stock ---
+
+ekg:StockLevel
+    a owl:Class ;
+    rdfs:label "Stock Level" ;
+    rdfs:comment "On-hand stock for a product at a location (Odoo stock.quant)." .
+
+ekg:stock_of
+    a owl:ObjectProperty ;
+    rdfs:label "stock of" ;
+    rdfs:domain ekg:StockLevel ;
+    rdfs:range ekg:Product .
+
+ekg:quantity
+    a owl:DatatypeProperty ;
+    rdfs:label "on-hand quantity" ;
+    rdfs:comment "On-hand quantity (stock.quant.quantity)." ;
+    rdfs:domain ekg:StockLevel ;
+    rdfs:range xsd:decimal .
+
+ekg:reserved_quantity
+    a owl:DatatypeProperty ;
+    rdfs:label "reserved quantity" ;
+    rdfs:comment "Quantity already reserved (stock.quant.reserved_quantity)." ;
+    rdfs:domain ekg:StockLevel ;
+    rdfs:range xsd:decimal .
+
+ekg:ReorderRule
+    a owl:Class ;
+    rdfs:label "Reorder Rule" ;
+    rdfs:comment "A reordering rule carrying the safety-stock minimum (Odoo stock.warehouse.orderpoint)." .
+
+ekg:reorder_for
+    a owl:ObjectProperty ;
+    rdfs:label "reorder for" ;
+    rdfs:domain ekg:ReorderRule ;
+    rdfs:range ekg:Product .
+
+ekg:product_min_qty
+    a owl:DatatypeProperty ;
+    rdfs:label "safety stock" ;
+    rdfs:comment "Minimum/safety stock (stock.warehouse.orderpoint.product_min_qty), the planning floor \"the plan\" keeps coverage above." ;
+    rdfs:domain ekg:ReorderRule ;
+    rdfs:range xsd:decimal .
+
+ekg:product_max_qty
+    a owl:DatatypeProperty ;
+    rdfs:label "maximum stock" ;
+    rdfs:domain ekg:ReorderRule ;
+    rdfs:range xsd:decimal .
+
+# --- Sales & the promise ---
+
+ekg:SalesOrder
+    a owl:Class ;
+    rdfs:label "Sales Order" ;
+    rdfs:comment "A customer order carrying the delivery promise (Odoo sale.order)." .
+
+ekg:OrderLine
+    a owl:Class ;
+    rdfs:label "Order Line" ;
+    rdfs:comment "One ordered product and quantity (Odoo sale.order.line)." .
+
+ekg:for_customer
+    a owl:ObjectProperty ;
+    rdfs:label "for customer" ;
+    rdfs:domain ekg:SalesOrder ;
+    rdfs:range ekg:Customer .
+
+ekg:has_line_of
+    a owl:ObjectProperty ;
+    rdfs:label "has order line" ;
+    rdfs:comment "An order line of this sales order. (Object property name distinct from BOM's has_line to keep domains disjoint.)" ;
+    rdfs:domain ekg:SalesOrder ;
+    rdfs:range ekg:OrderLine .
+
+ekg:line_product
+    a owl:ObjectProperty ;
+    rdfs:label "line product" ;
+    rdfs:comment "The product ordered on this line (sale.order.line.product_id)." ;
+    rdfs:domain ekg:OrderLine ;
+    rdfs:range ekg:Product .
+
+ekg:commitment_date
+    a owl:DatatypeProperty ;
+    rdfs:label "commitment date" ;
+    rdfs:comment "The customer delivery promise (sale.order.commitment_date), the date \"the plan\" must be able to meet." ;
+    rdfs:domain ekg:SalesOrder ;
+    rdfs:range xsd:dateTime .
+
+ekg:order_date
+    a owl:DatatypeProperty ;
+    rdfs:label "order date" ;
+    rdfs:range xsd:dateTime .
+
+ekg:order_value
+    a owl:DatatypeProperty ;
+    rdfs:label "order value" ;
+    rdfs:comment "The order's total monetary value (sale.order.amount_total), the revenue exposed if the promise is missed." ;
+    rdfs:domain ekg:SalesOrder ;
+    rdfs:range xsd:decimal .
+
+# --- Money ---
+
+ekg:Currency
+    a owl:Class ;
+    rdfs:label "Currency" ;
+    rdfs:comment "A currency money is recorded in (Odoo res.currency)." .
+
+ekg:currency_code
+    a owl:DatatypeProperty ;
+    rdfs:label "currency code" ;
+    rdfs:comment "The currency's ISO 4217 code (res.currency.name, e.g. USD)." ;
+    rdfs:domain ekg:Currency ;
+    rdfs:range xsd:string .
+
+ekg:in_currency
+    a owl:ObjectProperty ;
+    rdfs:label "in currency" ;
+    rdfs:comment "The currency an order's monetary values are recorded in (sale.order / purchase.order currency_id)." ;
+    rdfs:range ekg:Currency .
+
+ekg:product_uom_qty
+    a owl:DatatypeProperty ;
+    rdfs:label "ordered quantity" ;
+    rdfs:comment "Ordered quantity (sale.order.line.product_uom_qty)." ;
+    rdfs:domain ekg:OrderLine ;
+    rdfs:range xsd:decimal .
+
+# --- Risk (rule output) ---
+# These terms are asserted by the SPARQL risk rule (risk-rule.rq), not pulled
+# from Odoo. The rule is deterministic; a language model never decides risk.
+
+ekg:at_risk
+    a owl:DatatypeProperty ;
+    rdfs:label "at risk" ;
+    rdfs:comment "True when the deterministic risk rule finds the sales order's promise cannot be covered in time." ;
+    rdfs:domain ekg:SalesOrder ;
+    rdfs:range xsd:boolean .
+
+ekg:SupplyRisk
+    a owl:Class ;
+    rdfs:label "Supply Risk" ;
+    rdfs:comment "A materialized risk finding attached to an at-risk sales order: which component falls short, by how much, against which promise." .
+
+ekg:has_risk
+    a owl:ObjectProperty ;
+    rdfs:label "has risk" ;
+    rdfs:domain ekg:SalesOrder ;
+    rdfs:range ekg:SupplyRisk .
+
+ekg:risk_component
+    a owl:ObjectProperty ;
+    rdfs:label "risk component" ;
+    rdfs:comment "The component whose in-time availability falls short." ;
+    rdfs:domain ekg:SupplyRisk ;
+    rdfs:range ekg:Product .
+
+ekg:required_quantity
+    a owl:DatatypeProperty ;
+    rdfs:label "required quantity" ;
+    rdfs:domain ekg:SupplyRisk ;
+    rdfs:range xsd:decimal .
+
+ekg:available_by_commitment
+    a owl:DatatypeProperty ;
+    rdfs:label "available by commitment" ;
+    rdfs:comment "On-hand plus inbound that arrives on or before the commitment date." ;
+    rdfs:domain ekg:SupplyRisk ;
+    rdfs:range xsd:decimal .
+
+ekg:safety_stock
+    a owl:DatatypeProperty ;
+    rdfs:label "safety stock (at assessment)" ;
+    rdfs:domain ekg:SupplyRisk ;
+    rdfs:range xsd:decimal .
+
+ekg:shortfall
+    a owl:DatatypeProperty ;
+    rdfs:label "shortfall" ;
+    rdfs:comment "(required + safety_stock) − available_by_commitment; > 0 ⇒ at risk." ;
+    rdfs:domain ekg:SupplyRisk ;
+    rdfs:range xsd:decimal .
+
+# --- Manufacturing process (specialization) ---
+# The manufacturing process as a specialisation of the neutral core metamodel
+# (ekg-core.ttl): manufacturing orders, work orders and operations are ekg:Activity;
+# a work center is an ekg:Agent (contention is many activities performedBy one
+# agent). Odoo 19 source: mrp.production / mrp.workorder / mrp.workcenter /
+# mrp.routing.workcenter. Activities relate to the structural graph through the
+# neutral verbs ekg:performedBy / ekg:used / ekg:produced (a Product is an Artifact)
+# and carry ekg:lifecycle_state, ekg:startedAt / ekg:endedAt from the core.
+
+# --- Classes (subclasses of the neutral core) ---
+
+ekg:ManufacturingOrder
+    a owl:Class ;
+    rdfs:subClassOf ekg:Activity ;
+    rdfs:label "Manufacturing Order" ;
+    rdfs:comment "A production run building a product from a BOM (Odoo mrp.production). An ekg:Activity." .
+
+ekg:WorkOrder
+    a owl:Class ;
+    rdfs:subClassOf ekg:Activity ;
+    rdfs:label "Work Order" ;
+    rdfs:comment "One step of a manufacturing order performed at a work center (Odoo mrp.workorder). An ekg:Activity." .
+
+ekg:Operation
+    a owl:Class ;
+    rdfs:subClassOf ekg:Activity ;
+    rdfs:label "Operation" ;
+    rdfs:comment "A routing operation of a BOM: the planned step a work order realises (Odoo mrp.routing.workcenter). An ekg:Activity, ordered by ekg:op_sequence / ekg:precedes." .
+
+ekg:WorkCenter
+    a owl:Class ;
+    rdfs:subClassOf ekg:Agent ;
+    rdfs:label "Work Center" ;
+    rdfs:comment "A resource that performs work orders (Odoo mrp.workcenter). An ekg:Agent; carries ekg:capacity / ekg:time_efficiency / ekg:cost_per_hour." .
+
+# --- Object properties (manufacturing-specific; not covered by neutral verbs) ---
+# Domainless where shared, so RDFS domain entailment does not mis-type nodes.
+
+ekg:builds_from
+    a owl:ObjectProperty ;
+    rdfs:label "builds from" ;
+    rdfs:comment "The BOM a manufacturing order builds from (mrp.production.bom_id)." ;
+    rdfs:range ekg:BOM .
+
+ekg:has_work_order
+    a owl:ObjectProperty ;
+    rdfs:label "has work order" ;
+    rdfs:comment "A work order of this manufacturing order (mrp.production.workorder_ids)." ;
+    rdfs:range ekg:WorkOrder .
+
+ekg:part_of
+    a owl:ObjectProperty ;
+    rdfs:label "part of" ;
+    rdfs:comment "The manufacturing order a work order belongs to (mrp.workorder.production_id)." ;
+    rdfs:range ekg:ManufacturingOrder .
+
+ekg:realizes
+    a owl:ObjectProperty ;
+    rdfs:label "realizes" ;
+    rdfs:comment "The routing operation a work order realises (mrp.workorder.operation_id)." ;
+    rdfs:range ekg:Operation .
+
+ekg:operation_of
+    a owl:ObjectProperty ;
+    rdfs:label "operation of" ;
+    rdfs:comment "The BOM a routing operation belongs to (mrp.routing.workcenter.bom_id)." ;
+    rdfs:range ekg:BOM .
+
+ekg:fulfills
+    a owl:ObjectProperty ;
+    rdfs:label "fulfills" ;
+    rdfs:comment "The sales-order promise a manufacturing order fulfils, resolved from mrp.production.origin. Conditional: absent when no linkage resolves." ;
+    rdfs:range ekg:SalesOrder .
+
+# --- Datatype properties (activity/agent attributes; domainless) ---
+
+ekg:op_sequence
+    a owl:DatatypeProperty ;
+    rdfs:label "operation sequence" ;
+    rdfs:comment "Source ordering of a routing operation within its BOM (mrp.routing.workcenter.sequence); ekg:precedes is derived from it." ;
+    rdfs:range xsd:integer .
+
+ekg:duration_expected
+    a owl:DatatypeProperty ;
+    rdfs:label "expected duration" ;
+    rdfs:comment "Expected duration in minutes of a work order / operation (mrp.workorder.duration_expected, mrp.routing.workcenter.time_cycle_manual)." ;
+    rdfs:range xsd:decimal .
+
+ekg:capacity
+    a owl:DatatypeProperty ;
+    rdfs:label "capacity" ;
+    rdfs:comment "Parallel capacity of a work-center agent, resolved from mrp.workcenter.capacity.capacity: how much the agent can do at once (the substrate a later contention check weighs assignments against)." ;
+    rdfs:range xsd:decimal .
+
+ekg:time_efficiency
+    a owl:DatatypeProperty ;
+    rdfs:label "time efficiency" ;
+    rdfs:comment "Work-center time efficiency percentage (mrp.workcenter.time_efficiency)." ;
+    rdfs:range xsd:decimal .
+
+ekg:cost_per_hour
+    a owl:DatatypeProperty ;
+    rdfs:label "cost per hour" ;
+    rdfs:comment "Work-center cost per hour (mrp.workcenter.costs_hour)." ;
+    rdfs:range xsd:decimal .
+
+# --- Capacity source and origin (inputs to the derived used/fulfills/capacity) ---
+# ekg:capacity on the WorkCenter agent is derived (derive-process-edges.rq) from a
+# WorkCenterCapacity record; ekg:used from the MO's BOM components; ekg:fulfills by
+# matching a MO's origin_ref to a sales order's name. The ingestor does not do this:
+# the resolution is a graph derivation, not a source read.
+
+ekg:WorkCenterCapacity
+    a owl:Class ;
+    rdfs:label "Work Center Capacity" ;
+    rdfs:comment "A per-product parallel-capacity record of a work center (Odoo mrp.workcenter.capacity); its ekg:capacity is derived onto the work-center agent." .
+
+ekg:capacity_of
+    a owl:ObjectProperty ;
+    rdfs:label "capacity of" ;
+    rdfs:comment "The work center a capacity record belongs to (mrp.workcenter.capacity.workcenter_id)." ;
+    rdfs:range ekg:WorkCenter .
+
+ekg:capacity_for
+    a owl:ObjectProperty ;
+    rdfs:label "capacity for" ;
+    rdfs:comment "The product a per-product capacity record applies to (mrp.workcenter.capacity.product_id)." ;
+    rdfs:range ekg:Product .
+
+ekg:origin_ref
+    a owl:DatatypeProperty ;
+    rdfs:label "origin reference" ;
+    rdfs:comment "The source document reference of a manufacturing order (mrp.production.origin), matched to a sales order's name to derive ekg:fulfills." ;
+    rdfs:range xsd:string .

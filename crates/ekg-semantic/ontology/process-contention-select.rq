@@ -1,0 +1,41 @@
+# SELECT projection of the process resource-contention rule for the Restate monitor.
+# It finds, per work-center agent, work orders whose planned windows (ekg:startedAt to
+# ekg:endedAt) overlap, and for each such anchor work order projects the agent, the
+# agent's derived ekg:capacity, the anchor's ekg:part_of manufacturing order, the
+# window, and the count of distinct overlapping peers (plus their IRIs for the reason).
+# One row per contended anchor work order.
+#
+# The comparison is done in Rust: concurrency = overlapping peers + 1 (the anchor
+# itself), and a verdict is raised for the anchor's manufacturing order only when that
+# concurrency exceeds the agent's capacity. A capacity-2 agent running two overlapping
+# jobs is fine, a third is contention. The per-anchor overlap count is a conservative
+# approximation of the true interval max-overlap.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?wo ?wc ?capacity ?mo ?woStart ?woEnd
+       (COUNT(DISTINCT ?peer) AS ?overlapPeers)
+       (GROUP_CONCAT(DISTINCT STR(?peer); SEPARATOR=", ") AS ?peers)
+WHERE {
+    # the anchor work order: performed at a work center, within a planned window,
+    # part of a manufacturing order (the actionable subject a human reschedules).
+    ?wo a ekg:WorkOrder ;
+        ekg:performedBy ?wc ;
+        ekg:part_of     ?mo ;
+        ekg:startedAt   ?woStart ;
+        ekg:endedAt     ?woEnd .
+
+    # the agent's parallel capacity (derived onto the work-center agent).
+    ?wc ekg:capacity ?capacity .
+
+    # a distinct peer work order on the same work center whose window overlaps the
+    # anchor's (strict interval overlap: each starts before the other ends).
+    ?peer a ekg:WorkOrder ;
+          ekg:performedBy ?wc ;
+          ekg:startedAt   ?peerStart ;
+          ekg:endedAt     ?peerEnd .
+    FILTER(?peer != ?wo)
+    FILTER(?woStart < ?peerEnd && ?peerStart < ?woEnd)
+}
+GROUP BY ?wo ?wc ?capacity ?mo ?woStart ?woEnd

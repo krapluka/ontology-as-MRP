@@ -1,0 +1,217 @@
+# Supply-risk source-to-ontology mapping contract.
+#
+# Says, per Odoo source model, which ekg: class a record becomes and how each pulled
+# field projects into the world model. The loader (src/mapping.rs) validates every
+# class and property here against the ontology (supply-risk.ttl) at startup and
+# refuses to serve if a term has drifted. The contract is loaded once at startup;
+# there is no hot-reload. A second source is a new contract file, not a new projector.
+#
+# Field mapping forms:
+#   <field>: { property: <ekg-prop>, datatype: xsd:<type> }   # typed literal
+#   <field>: { property: <ekg-prop>, ref: <target.model> }    # object relation
+# Reference values are the referenced record's id(s) (an id for many2one, a list of
+# ids for one2many), projected forward from this record's own subject.
+
+version: 1
+source: odoo
+
+models:
+  # --- Sales and the promise ---
+  sale.order:
+    class: SalesOrder
+    fields:
+      name: { property: name, datatype: xsd:string }   # order reference; matched by MO origin (ekg:fulfills)
+      commitment_date: { property: commitment_date, datatype: xsd:dateTime }
+      date_order: { property: order_date, datatype: xsd:dateTime }
+      amount_total: { property: order_value, datatype: xsd:decimal }   # order revenue, feeds the revenue-at-risk KPI
+      currency_id: { property: in_currency, ref: res.currency }   # the currency amount_total is in
+      partner_id: { property: for_customer, ref: res.partner }
+      order_line: { property: has_line_of, ref: sale.order.line }
+
+  sale.order.line:
+    class: OrderLine
+    fields:
+      product_id: { property: line_product, ref: product.product }
+      product_uom_qty: { property: product_uom_qty, datatype: xsd:decimal }
+
+  # --- Products ---
+  product.product:
+    class: Product
+    fields:
+      name: { property: name, datatype: xsd:string }
+      default_code: { property: default_code, datatype: xsd:string }
+
+  # --- Bill of materials (multi-level) ---
+  mrp.bom:
+    class: BOM
+    fields:
+      product_id: { property: produces_product, ref: product.product }
+      bom_line_ids: { property: has_line, ref: mrp.bom.line }
+      produce_delay: { property: produce_delay, datatype: xsd:integer }
+
+  mrp.bom.line:
+    class: BomLine
+    fields:
+      product_id: { property: component_product, ref: product.product }
+      product_qty: { property: product_qty, datatype: xsd:decimal }
+
+  # --- Parties (role by rank) ---
+  res.partner:
+    class: Party
+    fields:
+      name: { property: name, datatype: xsd:string }
+      supplier_rank: { property: supplier_rank, datatype: xsd:integer }
+      customer_rank: { property: customer_rank, datatype: xsd:integer }
+    variants:
+      - when: { field: supplier_rank, gt: 0 }
+        class: Supplier
+      - when: { field: customer_rank, gt: 0 }
+        class: Customer
+
+  # --- Money ---
+  # The currency an order's money is recorded in, as its ISO 4217 code (res.currency.name,
+  # e.g. USD), so every monetary value is served with the currency the source recorded.
+  # res.currency has an `active` flag, so the sweep lists only active currencies.
+  res.currency:
+    class: Currency
+    fields:
+      name: { property: currency_code, datatype: xsd:string }
+
+  # --- Supplier sourcing and lead time ---
+  product.supplierinfo:
+    class: SupplierLink
+    fields:
+      product_id: { property: supplies_product, ref: product.product }
+      partner_id: { property: supplied_by, ref: res.partner }
+      delay: { property: delay, datatype: xsd:integer }
+      min_qty: { property: min_qty, datatype: xsd:decimal }
+      sequence: { property: sequence, datatype: xsd:integer }
+
+  # --- Inbound purchase orders ---
+  purchase.order:
+    class: PurchaseOrder
+    fields:
+      name: { property: name, datatype: xsd:string }   # PO reference (e.g. P00087), the tabs' label
+      partner_id: { property: from_supplier, ref: res.partner }
+      currency_id: { property: in_currency, ref: res.currency }   # the currency its line prices are in
+      order_line: { property: has_po_line, ref: purchase.order.line }
+      # When the buyer confirmed it; with the supplier's lead time, the earliest it can arrive.
+      date_approve: { property: approved_at, datatype: xsd:dateTime }
+      # The buyer-confirmation state (draft/sent/purchase/done); the auto-apply
+      # supplier-confirmed predicate treats purchase/done as confirmed.
+      state: { property: lifecycle_state, datatype: xsd:string }
+
+  purchase.order.line:
+    class: PurchaseOrderLine
+    fields:
+      product_id: { property: po_line_product, ref: product.product }
+      product_qty: { property: product_qty, datatype: xsd:decimal }
+      date_planned: { property: date_planned, datatype: xsd:dateTime }
+      # Already-received quantity: on hand, so the risk rule counts only the open rest inbound.
+      qty_received: { property: qty_received, datatype: xsd:decimal }
+      # The line's unit price, summed per plan by the auto-apply cost predicate.
+      # Sensitive: hidden from a non-procurement grounding by the read-policy.
+      price_unit: { property: unit_price, datatype: xsd:decimal }
+
+  # --- Inbound transport ---
+  # An incoming shipment (stock.picking) fulfilling a purchase order. Its ETA
+  # (scheduled_date) is the logistics arrival the risk rule uses in place of the
+  # PO line's date_planned when a shipment delivers that PO. `purchase_id` is
+  # provided by Odoo's purchase_stock module. `state` is the descriptive transport
+  # status. The geofence/last_position ontology terms have no native stock.picking
+  # field and are left unmapped; the ETA is the risk-bearing signal.
+  stock.picking:
+    class: Shipment
+    # Only receipts are shipments that bring goods in. A vendor return keeps its purchase_id,
+    # so without this scope an open return would read as an inbound shipment that can still
+    # deliver the PO's unreceived rest. The type code alone is config-dependent: when the
+    # receipt type has no return type set, Odoo's return wizard reuses the (incoming) receipt
+    # type for the return. So the direction is pinned too, against stock rather than one
+    # outside usage: a receipt always ends in an internal location, and a return never does,
+    # whether it goes back to a vendor (supplier usage) or, for a sister company's vendor
+    # location, to inter-company transit.
+    scope:
+      - { field: picking_type_code, op: "=", value: incoming }
+      - { field: location_dest_id.usage, op: "=", value: internal }
+    fields:
+      scheduled_date: { property: eta, datatype: xsd:dateTime }
+      # When the receipt was completed: the delivered-on date (distinct from the
+      # scheduled ETA) that supplier on-time delivery is computed from. Absent until
+      # the receipt is done; Odoo returns false, which is dropped.
+      date_done: { property: completed_at, datatype: xsd:dateTime }
+      purchase_id: { property: delivers, ref: purchase.order }
+      state: { property: transport_status, datatype: xsd:string }
+
+  # --- Stock on hand and safety stock ---
+  stock.quant:
+    class: StockLevel
+    # Only stock at internal locations is on hand. Real receipts and inventory adjustments
+    # book counterpart quants at virtual locations (Vendors, Inventory adjustment); those are
+    # bookkeeping, not stock, and are never ingested (reconciliation retracts any that were).
+    scope:
+      - { field: location_id.usage, op: "=", value: internal }
+    fields:
+      product_id: { property: stock_of, ref: product.product }
+      quantity: { property: quantity, datatype: xsd:decimal }
+      reserved_quantity: { property: reserved_quantity, datatype: xsd:decimal }
+
+  stock.warehouse.orderpoint:
+    class: ReorderRule
+    fields:
+      product_id: { property: reorder_for, ref: product.product }
+      product_min_qty: { property: product_min_qty, datatype: xsd:decimal }
+      product_max_qty: { property: product_max_qty, datatype: xsd:decimal }
+
+  # --- Manufacturing process (specialisation of the neutral core metamodel) ---
+  # Odoo 19 MRP. Direct field references project through the contract; the
+  # child-resolution edges (ekg:used from move_raw_ids, ekg:fulfills from origin,
+  # ekg:capacity from capacity_ids) are resolved during ingestion, not here.
+  # Manufacturing fields project onto the neutral verbs (performedBy/produced/
+  # lifecycle_state/startedAt/endedAt) so the process reasons at the metamodel level.
+  mrp.production:
+    class: ManufacturingOrder
+    fields:
+      name: { property: name, datatype: xsd:string }   # MO reference (e.g. WH/MO/00016), the tabs' label
+      product_id: { property: produced, ref: product.product }
+      bom_id: { property: builds_from, ref: mrp.bom }
+      workorder_ids: { property: has_work_order, ref: mrp.workorder }
+      product_qty: { property: product_qty, datatype: xsd:decimal }
+      state: { property: lifecycle_state, datatype: xsd:string }
+      origin: { property: origin_ref, datatype: xsd:string }   # matched to sale.order.name (ekg:fulfills)
+      date_start: { property: startedAt, datatype: xsd:dateTime }
+      date_finished: { property: endedAt, datatype: xsd:dateTime }
+
+  mrp.workorder:
+    class: WorkOrder
+    fields:
+      production_id: { property: part_of, ref: mrp.production }
+      workcenter_id: { property: performedBy, ref: mrp.workcenter }
+      operation_id: { property: realizes, ref: mrp.routing.workcenter }
+      state: { property: lifecycle_state, datatype: xsd:string }
+      date_start: { property: startedAt, datatype: xsd:dateTime }
+      date_finished: { property: endedAt, datatype: xsd:dateTime }
+      duration_expected: { property: duration_expected, datatype: xsd:decimal }
+
+  mrp.workcenter:
+    class: WorkCenter
+    fields:
+      name: { property: name, datatype: xsd:string }
+      time_efficiency: { property: time_efficiency, datatype: xsd:decimal }
+      costs_hour: { property: cost_per_hour, datatype: xsd:decimal }
+
+  mrp.routing.workcenter:
+    class: Operation
+    fields:
+      name: { property: name, datatype: xsd:string }
+      bom_id: { property: operation_of, ref: mrp.bom }
+      workcenter_id: { property: performedBy, ref: mrp.workcenter }
+      sequence: { property: op_sequence, datatype: xsd:integer }
+      time_cycle_manual: { property: duration_expected, datatype: xsd:decimal }
+
+  # Per-product capacity of a work center; ekg:capacity is derived onto the agent.
+  mrp.workcenter.capacity:
+    class: WorkCenterCapacity
+    fields:
+      workcenter_id: { property: capacity_of, ref: mrp.workcenter }
+      product_id: { property: capacity_for, ref: product.product }
+      capacity: { property: capacity, datatype: xsd:decimal }

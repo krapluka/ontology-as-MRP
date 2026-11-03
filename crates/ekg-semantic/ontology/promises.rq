@@ -1,0 +1,13 @@
+# Delivery judgment input: every sales order's promise. Run against the current world it is
+# each order's original promise (the slip's baseline); run against a what-if projection it is
+# the projected promise. The supply-risk scorer sums it in whole days to rank a plan that moves
+# promises later behind one that does not.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?so ?commitment
+WHERE {
+    ?so a ekg:SalesOrder ;
+        ekg:commitment_date ?commitment .
+}
+ORDER BY ?so

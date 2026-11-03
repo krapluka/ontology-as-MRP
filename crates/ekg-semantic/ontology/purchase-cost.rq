@@ -1,0 +1,13 @@
+# Rank input: the cost a plan's purchase target touches, summed the way the policy context
+# sums it: a purchase-order line's own `ekg:unit_price`, or a purchase order's summed line
+# prices. Read from a what-if projection, which carries the base facts.
+# `<urn:ekg:subject>` is replaced only with an IRI `ontology::canonical_subject` rebuilt.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT (SUM(?price) AS ?cost)
+WHERE {
+    { <urn:ekg:subject> ekg:unit_price ?price }
+    UNION
+    { <urn:ekg:subject> ekg:has_po_line ?line . ?line ekg:unit_price ?price }
+}

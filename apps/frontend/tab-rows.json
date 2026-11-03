@@ -1,0 +1,127 @@
+{
+  "flow": {
+    "keys": [
+      "arrival",
+      "at_risk",
+      "cause",
+      "commitment_date",
+      "entity",
+      "label",
+      "lead_time",
+      "lifecycle_state",
+      "on_hand",
+      "on_path",
+      "order_value",
+      "part_of",
+      "product",
+      "quantity",
+      "safety",
+      "sourcing",
+      "stage",
+      "supplier"
+    ],
+    "enums": {
+      "sourcing": [
+        "backup",
+        "primary",
+        "single"
+      ],
+      "stage": [
+        "in_production",
+        "in_stock",
+        "on_order",
+        "promised",
+        "suppliers"
+      ]
+    }
+  },
+  "graph": {
+    "keys": [
+      "at_risk",
+      "cause",
+      "kind",
+      "label",
+      "node",
+      "o",
+      "on_path",
+      "p",
+      "role",
+      "s"
+    ],
+    "enums": {
+      "kind": [
+        "edge",
+        "node"
+      ],
+      "role": [
+        "BOM",
+        "Component",
+        "Customer",
+        "Product",
+        "PurchaseOrder",
+        "SalesOrder",
+        "Supplier"
+      ]
+    }
+  },
+  "suppliers": {
+    "keys": [
+      "arrival",
+      "at_risk",
+      "cause",
+      "commitment_date",
+      "demand",
+      "exposure",
+      "kind",
+      "label",
+      "lead_time",
+      "on_hand",
+      "on_path",
+      "order",
+      "order_value",
+      "otd",
+      "po",
+      "product",
+      "quantity",
+      "safety",
+      "sourcing",
+      "stock_of",
+      "supplier"
+    ],
+    "enums": {
+      "kind": [
+        "dependent_order",
+        "open_po",
+        "stock",
+        "supplier"
+      ],
+      "sourcing": [
+        "backup",
+        "primary",
+        "single"
+      ]
+    }
+  },
+  "timeline": {
+    "keys": [
+      "at_risk",
+      "cause",
+      "date",
+      "entity",
+      "kind",
+      "label",
+      "on_path",
+      "order_value",
+      "product",
+      "quantity",
+      "supplier"
+    ],
+    "enums": {
+      "kind": [
+        "inbound",
+        "promise",
+        "ready"
+      ]
+    }
+  }
+}

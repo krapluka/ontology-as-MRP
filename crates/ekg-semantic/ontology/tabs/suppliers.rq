@@ -1,0 +1,56 @@
+# Suppliers tab: the supplier table.
+#
+# Subject-free: the whole supplier base, one ?kind "supplier" row each, with:
+#
+#   ?lead_time           the longest declared sourcing lead (`delay`) over its links.
+#   ?completed/?on_time  the on-time-delivery evidence (the ratio is finished in Rust, which
+#                        drops these two keys and omits the figure without receipts): its
+#                        completed incoming receipts (`completed_at` and transport status
+#                        "done") delivering one of its purchase orders, completed inside the
+#                        trailing window [OTD-from, today]. A receipt is on time when its
+#                        completion day is on or before the PO's planned day (the latest
+#                        `date_planned` over its lines: the date agreed with the supplier,
+#                        not the shipment's moving ETA). Days compare as SUBSTR(STR(?x), 1, 10)
+#                        because SPARQL 1.1 has no xsd:date cast of a dateTime.
+#
+# The sourcing role and the exposure are derived in Rust (from the sourcing links, the at-risk
+# set and the cause map), so they cannot drift from the rules' verdict. The window bounds are
+# ISO date literals computed in Rust per read. There is no NOW() here, so a day can be pinned.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?kind ?supplier ?label ?lead_time ?completed ?on_time
+WHERE {
+    BIND("supplier" AS ?kind)
+    ?supplier a ekg:Supplier .
+    FILTER(REGEX(STR(?supplier), "{{CANONICAL_IRI}}"))
+    OPTIONAL { ?supplier ekg:name ?label }
+    OPTIONAL {
+        SELECT ?supplier (MAX(?delay) AS ?lead_time) WHERE {
+            ?leadLink ekg:supplied_by ?supplier ;
+                      ekg:delay       ?delay .
+        } GROUP BY ?supplier
+    }
+    OPTIONAL {
+        SELECT ?supplier (COUNT(?receipt) AS ?completed) (SUM(?onTimeFlag) AS ?on_time) WHERE {
+            SELECT DISTINCT ?supplier ?receipt ?onTimeFlag WHERE {
+                ?po a ekg:PurchaseOrder ;
+                    ekg:from_supplier ?supplier .
+                ?receipt a ekg:Shipment ;
+                         ekg:delivers         ?po ;
+                         ekg:completed_at     ?done ;
+                         ekg:transport_status "done" .
+                BIND(SUBSTR(STR(?done), 1, 10) AS ?doneDay)
+                FILTER(?doneDay >= "{{OTD_FROM}}" && ?doneDay <= "{{TODAY}}")
+                {
+                    SELECT ?po (MAX(?linePlanned) AS ?planned) WHERE {
+                        ?po ekg:has_po_line ?plannedLine .
+                        ?plannedLine ekg:date_planned ?linePlanned .
+                    } GROUP BY ?po
+                }
+                BIND(IF(?doneDay <= SUBSTR(STR(?planned), 1, 10), 1, 0) AS ?onTimeFlag)
+            }
+        } GROUP BY ?supplier
+    }
+}
+ORDER BY ?supplier

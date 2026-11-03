@@ -1,0 +1,9 @@
+{
+  "expedite_po": "Expedite",
+  "notify_owner": "Notify",
+  "raise_work_center_capacity": "Raise capacity",
+  "re_promise_date": "Re-promise",
+  "reassign_work_center": "Reassign",
+  "reschedule_work_order": "Move",
+  "split_production": "Split"
+}

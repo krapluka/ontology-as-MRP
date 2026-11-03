@@ -1,0 +1,28 @@
+[package]
+name = "ekg-kinetic"
+description = "Kinetic layer: governed action types (verbs) with reverse actions and policy-tiered promotion. Owns the ActionExecutor driver."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+# The ActionExecutor trait and the promotion and receipt types.
+ekg-domain = { workspace = true }
+# The json2 client ingestion also uses. It is synchronous (ureq), so the executor
+# calls it through spawn_blocking.
+odoo-client = { workspace = true }
+# ActionExecutor is an async trait used as a trait object.
+async-trait = "0.1"
+# The undo payload carried on the execution receipt is JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# spawn_blocking, for the synchronous odoo-client.
+tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+
+[lints]
+workspace = true

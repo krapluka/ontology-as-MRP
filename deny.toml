@@ -1,0 +1,71 @@
+# cargo-deny: Rust-native supply-chain governance (advisories, licenses, bans,
+# sources). Replaces the ORT/SBOM harness with an all-Rust gate. Run: `just audit`.
+[advisories]
+version = 2
+yanked = "deny"
+# Documented, scoped exceptions. Each MUST name the advisory, the path that pulls
+# it, why no fix is takeable, and why it is safe in our usage.
+ignore = [
+    # Marvin Attack: non-constant-time RSA. No safe upgrade exists (rsa 0.9.10 is
+    # latest; the advisory itself notes 0.10.0-rc is still affected). Pulled only
+    # transitively: restate-sdk → restate-sdk-shared-core → jsonwebtoken → rsa. The
+    # ingestion path uses Restate over a local/trusted network and performs no RSA
+    # private-key operations, so the network timing side channel is not exercised.
+    # Revisit when the Restate SDK drops the RSA-backed jsonwebtoken path.
+    "RUSTSEC-2023-0071",
+    # Timing variability in crypto-bigint below 0.7.6. No fix is takeable: 0.5.5 is
+    # held by elliptic-curve 0.13, pulled transitively by restate-sdk →
+    # restate-sdk-shared-core → jsonwebtoken → p256/p384, and restate-sdk 0.13 keeps
+    # the same path. The SDK uses jsonwebtoken only to verify EdDSA request identity
+    # tokens with public keys, so no secret integer reaches crypto-bigint.
+    # Revisit when the Restate SDK moves to a jsonwebtoken on elliptic-curve 0.14.
+    "RUSTSEC-2026-0387",
+]
+
+[licenses]
+version = 2
+# Permissive licenses acceptable for an owned, standards-based substrate.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+]
+confidence-threshold = 0.9
+unused-allowed-license = "allow"
+
+# Documented, scoped per-crate exceptions. MPL-2.0 is weak (file-level) copyleft: its
+# obligation is to share modifications to the MPL-licensed *files*. We neither modify
+# nor redistribute these crates' sources (they are pulled transitively and used only as
+# compiled dependencies), so the copyleft imposes no obligation on our code. Both come in
+# via the read-only GraphQL surface's dependency (async-graphql's built-in email validator,
+# `fast_chemail` → `ascii_utils`), which our schema does not exercise (no email scalar).
+[[licenses.exceptions]]
+crate = "fast_chemail"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+crate = "ascii_utils"
+allow = ["MPL-2.0"]
+
+# CDLA-Permissive-2.0 is a permissive *data* licence (it covers the Mozilla CA bundle as
+# data). `webpki-root-certs` is declared by `rustls-platform-verifier` (the OS-trust-store
+# verifier under the cognition boundary's reqwest/rustls transport) **only for
+# `wasm32`**; no target we build compiles it. Every native build trusts the OS store.
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

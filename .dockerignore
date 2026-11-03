@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Rust build output (rebuilt in the builder stage)
+target
+
+# Node deps / build scratch: never ship host artifacts into any build context. The
+# frontend image intentionally packages its prebuilt bundle (built on the host / CI),
+# so apps/frontend/dist is re-included below.
+**/node_modules
+**/dist
+**/storybook-static
+**/*.tsbuildinfo
+!apps/frontend/dist
+
+# CI / tooling / docs
+.github
+.vscode
+docs
+justfile
+lefthook.yml
+cliff.toml
+cog.toml
+deny.toml
+.editorconfig
+.nvmrc
+
+# Frontend (the React app is the final step; not part of the backend image)
+frontend
+web
+
+# Reports
+sbom.cdx.json
+
+# Secrets: never include
+.env*
+!.env.example
+*.pem
+*.key
+*.crt
+.cargo/credentials
+.cargo/credentials.toml
+
+# Local substrate data (durable volumes; never in an image)
+/deploy/podman/local/.data/
+
+# Misc
+*.log

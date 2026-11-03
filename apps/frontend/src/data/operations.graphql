@@ -1,0 +1,203 @@
+# The reads the Risk inbox performs against the plant-pulse-api GraphQL surface. Only
+# fields the contract serves are selected; the view-model layer derives the rest.
+
+fragment PointFields on ActionPoint {
+  id
+  subject
+  state
+  reason
+  code
+}
+
+fragment ChangeFields on Change {
+  verb
+  object
+  params {
+    key
+    value
+  }
+  inverse
+  from
+  label
+}
+
+fragment TraceFields on Trace {
+  summary {
+    simulated
+    rejected
+    openAssumptions
+  }
+  steps {
+    tag
+    text
+    rejected
+  }
+}
+
+fragment PlanFields on Plan {
+  subject
+  resolves
+  lead
+  baseline {
+    rankKey
+    metrics {
+      key
+      value
+    }
+  }
+  trace {
+    ...TraceFields
+  }
+  options {
+    recommended
+    rankKey
+    needs {
+      code
+      detail
+    }
+    changes {
+      ...ChangeFields
+    }
+    metrics {
+      key
+      value
+    }
+    scope {
+      kind
+      count
+    }
+    lanes {
+      workCenter
+      capacity
+      before {
+        workOrder
+        start
+        end
+        row
+        changed
+      }
+      after {
+        workOrder
+        start
+        end
+        row
+        changed
+      }
+    }
+    trace {
+      ...TraceFields
+    }
+  }
+}
+
+# The plans awaiting oversight, one inbox row each. A plan read that fails is reported as a
+# field error on that entry's `plan` only.
+query Plans {
+  plans {
+    id
+    code
+    resolves {
+      ...PointFields
+    }
+    portfolio {
+      id
+      generation
+    }
+    openedAt
+    situation
+    plan {
+      ...PlanFields
+    }
+  }
+}
+
+# The plans the operator approved since `since` (the start of their local day, epoch seconds),
+# plus earlier ones whose undo window is still open.
+query ApprovedPlans($since: String) {
+  approvedPlans(since: $since) {
+    id
+    code
+    resolves {
+      ...PointFields
+    }
+    portfolio {
+      id
+      generation
+    }
+    rankKey
+    changes {
+      ...ChangeFields
+    }
+    reviewer
+    rationale
+    promotedAt
+    undoUntil
+    reversible
+    remaining
+  }
+}
+
+query AutoApplied {
+  autoApplied {
+    actionPoint
+    subject
+    code
+    actionPointCode
+    changes {
+      ...ChangeFields
+    }
+    criteria {
+      rule
+      value
+    }
+    appliedAt
+    undoUntil
+    reversible
+    metrics {
+      key
+      value
+    }
+  }
+}
+
+query ReadModel($subject: ID!, $tab: TabKind!) {
+  readModel(subject: $subject, tab: $tab) {
+    subject
+    tab
+    rows {
+      fields {
+        key
+        value
+      }
+    }
+  }
+}
+
+query HeadlineMetrics {
+  headlineMetrics {
+    key
+    value
+  }
+}
+
+query ActivePolicy {
+  policy {
+    policyId
+    criteria {
+      rule
+      value
+    }
+    costLimitCurrency
+    undoWindow
+    autoApplyActions
+  }
+}
+
+# The display labels of the entity ids on screen. Only the ids the read can name come back.
+# A label is display-only and texts keep their ids.
+query Labels($ids: [ID!]!) {
+  labels(ids: $ids) {
+    id
+    label
+  }
+}

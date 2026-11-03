@@ -1,0 +1,12 @@
+# Proposer input: the work centres the process agent may name in a reassignment. Identifiers
+# only: the agent's `list_work_centres` tool grounds each one under the scheduler's read
+# context, so every fact it sees passes the read policy and its omissions are disclosed.
+# Subject-free: the plant's work centres, nothing else.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT DISTINCT ?entity
+WHERE {
+    ?entity a ekg:WorkCenter .
+}
+ORDER BY ?entity

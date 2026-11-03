@@ -1,0 +1,13 @@
+# Display input: a sales order's value and the ISO code of the currency it is recorded in.
+# `<urn:ekg:subject>` is replaced only with an IRI `ontology::canonical_subject` rebuilt.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?value ?currency
+WHERE {
+    OPTIONAL { <urn:ekg:subject> ekg:order_value ?value }
+    OPTIONAL {
+        <urn:ekg:subject> ekg:in_currency ?c .
+        ?c ekg:currency_code ?currency .
+    }
+}

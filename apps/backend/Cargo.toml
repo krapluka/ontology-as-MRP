@@ -1,0 +1,123 @@
+[package]
+name = "ekg-backend"
+description = "Axum backend: /api, the ingestion endpoint, the human promote gate, and the code-generated OpenAPI contract. Wires the engine seams to real drivers."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+# Four binaries (the server, export-contracts, skills, rollout): a bare
+# `cargo run -p ekg-backend` (`just backend`) starts the server.
+default-run = "ekg-backend"
+
+[lib]
+name = "ekg_backend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ekg-backend"
+path = "src/main.rs"
+
+# Exports the contracts the frontend consumes (schema.graphql, openapi.json and tab-rows.json,
+# the tab row vocabulary) from code, with no running backend: `just frontend-contracts`.
+[[bin]]
+name = "export-contracts"
+path = "src/bin/export-contracts.rs"
+
+# The internal agent-skill commands (validate, publish, activate, list) over the Restate
+# ingress: `just skills-*`.
+[[bin]]
+name = "skills"
+path = "src/bin/skills.rs"
+
+# The internal agent rollout commands (mode, status) over the Restate ingress: `just agent-*`.
+[[bin]]
+name = "rollout"
+path = "src/bin/rollout.rs"
+
+# The offline eval of the tool-using agent against the real model: `just agent-eval`.
+[[bin]]
+name = "agent-eval"
+path = "src/bin/agent-eval.rs"
+
+[dependencies]
+# HTTP surface behind /api (the Odoo ingestion webhook).
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The promotion criteria document, in the eval set's own format.
+serde-saphyr = "1.3"
+# Engine seams (RdfChanged / RdfChangePublisher, SourceRef).
+ekg-domain = { workspace = true }
+# Real drivers for the durable worker: the Odoo SourceIngestor, the GraphDB
+# WorldModel, and the authoritative entity/graph IRI scheme it publishes with.
+ekg-semantic = { workspace = true }
+# The dynamic layer: the durable drift monitor + action-point virtual object the
+# backend registers, and the neutral RiskRule the capability wiring injects.
+ekg-dynamic = { path = "../../crates/ekg-dynamic", version = "0.1.0" }
+# The cognition boundary: the OpenAI-compatible provider and the bounded proposal
+# agent the backend specializes with the supply-risk prompt + action catalog.
+ekg-cognition = { path = "../../crates/ekg-cognition", version = "0.1.0" }
+# The kinetic layer: the OdooActionExecutor the promote route runs to write back.
+ekg-kinetic = { path = "../../crates/ekg-kinetic", version = "0.1.0" }
+# Durable execution: the ingest virtual object + reconciliation sweep run on the
+# Restate Rust SDK (single-writer-per-entity via keyed exclusivity).
+restate-sdk = "0.13"
+# Submit accepted webhooks to the Restate ingress. Plain HTTP, no TLS: the ingress is
+# reached over http:// locally, like ekg-semantic's GraphDB client, which keeps the TLS
+# stack out of the cargo-deny licence check. A networked deployment re-enables TLS.
+reqwest = { version = "0.12", default-features = false }
+# Dyn-safe async impl of the RdfChangePublisher seam.
+async-trait = "0.1"
+# Durable event backbone: the NatsPublisher driver and the monitor's JetStream consumer.
+# Opt-in via EKG_EVENT_BUS=nats; the in-process fan-out stays the default so `just check`
+# needs no broker. Default features minus `websockets`: we connect over plain nats:// TCP
+# (like the http-only GraphDB/Restate clients), and the websocket transport drags in
+# webpki-roots (CDLA-Permissive-2.0), which the cargo-deny licence check rejects.
+async-nats = { version = "0.51", default-features = false, features = [
+    "jetstream",
+    "ring",
+    "crypto",
+    "nkeys",
+    "nuid",
+    "server_2_10",
+    "server_2_11",
+    "server_2_12",
+    "server_2_14",
+] }
+# Drive the JetStream consumer's message stream (StreamExt::next).
+futures = "0.3"
+# Code-generated OpenAPI 3.1 contract for the /api surface (utoipa derive macros +
+# #[utoipa::path]). apps/backend only: the neutral core stays free of doc tooling.
+utoipa = "6"
+# The read-only GraphQL surface behind POST /api/graphql: a Query root only, no Mutation
+# type, so every governed mutation stays an explicit REST command. apps/backend only, like
+# utoipa; the neutral core (ekg-domain) stays tooling-free. Pinned to one exact version so
+# the core and the -axum/-derive/-parser crates never skew.
+# async-graphql's built-in email validator pulls MPL-2.0 transitive deps (`fast_chemail`,
+# then `ascii_utils`); the cargo-deny licence check passes only with the scoped exceptions
+# in `deny.toml`. Keep them when bumping this dependency.
+async-graphql = "=7.2.1"
+async-graphql-axum = "=7.2.1"
+# Trace export, installed only when an OTLP endpoint is configured: the SDK's batch processor
+# and the OTLP exporter over HTTP with protobuf. No gRPC (no tonic) and no bundled TLS provider.
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+# The exporter's HTTP client is the workspace's TLS-capable one without a bundled provider:
+# ring is installed before it is built, as the cognition clients do.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+[dev-dependencies]
+# The in-memory seam fakes, for the hermetic slate-routing tests (resolver-3 keeps this
+# test-only).
+ekg-domain = { workspace = true, features = ["test-support"] }
+# Drive the router in hermetic route tests (oneshot) without a live server.
+tower = { version = "0.5", features = ["util"] }
+# A unit test of the joint plan path drives the agent tool gateway as an MCP client, over
+# plain http://.
+rmcp = { version = "3.5", default-features = false, features = ["client", "transport-streamable-http-client-reqwest", "reqwest-tls-no-provider"] }
+
+[lints]
+workspace = true

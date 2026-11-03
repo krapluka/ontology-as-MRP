@@ -1,0 +1,314 @@
+#
+# SHACL write shapes, enforced transactionally on every materialization.
+#
+# These carry only constraints validate-on-write can enforce without false
+# rejections under named-graph-per-entity materialization:
+#   * each entity's own datatype and own-cardinality constraints, and
+#   * mandatory provenance, inlined on the GovernedEntity target-class shape.
+#
+# Provenance is inlined (not pulled via `sh:node`): the `sh:node` indirection does
+# not fire in GraphDB's transactional SHACL. The GovernedEntity target covers every
+# materialized entity (the projection types each one ekg:GovernedEntity), and the
+# entity's own `#source` node is written in the same transaction, so the provenance
+# `sh:class ekg:SourceRecord` is satisfied on write.
+#
+# Cross-entity constraints (sh:class on object values, relation cardinalities to
+# other entities) are absent here. They live in consistency-shapes.ttl and are
+# validated over the settled whole graph. Putting them here would reject a valid
+# write whose referent is not yet materialized.
+#
+# Loaded into the reserved graph http://rdf4j.org/schema/rdf4j#SHACLShapeGraph.
+
+@prefix ekg:  <https://ekg.example/ontology#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Global provenance: every materialized entity must trace to a source record ---
+# Inlined here (not via sh:node) so it fires on write. Targets the neutral base
+# class the projection puts on every entity, so provenance is enforced on every
+# write regardless of domain type.
+ekg:GovernedEntityShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:GovernedEntity ;
+    sh:property [
+        sh:path ekg:wasDerivedFrom ;
+        sh:minCount 1 ;
+        sh:class ekg:SourceRecord ;
+        sh:message "Every materialized entity must trace to a source record (ekg:wasDerivedFrom)." ;
+    ] .
+
+# --- Sales and promise ---
+
+ekg:SalesOrderShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:SalesOrder ;
+    sh:property [
+        sh:path ekg:commitment_date ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:message "A sales order carries at most one commitment_date (the promise)." ;
+    ] ;
+    sh:property [
+        sh:path ekg:order_value ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:message "A sales order carries at most one order_value (the order total)." ;
+    ] ;
+    sh:property [
+        sh:path ekg:in_currency ;
+        sh:maxCount 1 ;
+        sh:message "A sales order is recorded in at most one currency (in_currency)." ;
+    ] .
+
+ekg:OrderLineShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:OrderLine ;
+    sh:property [
+        sh:path ekg:product_uom_qty ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:message "An order line has a positive ordered quantity." ;
+    ] .
+
+# --- Product ---
+
+ekg:ProductShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:Product ;
+    sh:property [
+        sh:path ekg:name ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+    ] ;
+    sh:property [
+        sh:path ekg:default_code ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+    ] .
+
+# --- BOM ---
+
+ekg:BomShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:BOM ;
+    sh:property [
+        sh:path ekg:produce_delay ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+    ] .
+
+ekg:BomLineShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:BomLine ;
+    sh:property [
+        sh:path ekg:product_qty ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+        sh:message "A BOM line consumes a positive quantity." ;
+    ] .
+
+# --- Supplier sourcing ---
+
+ekg:SupplierLinkShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:SupplierLink ;
+    sh:property [
+        sh:path ekg:delay ;
+        sh:datatype xsd:integer ;
+        sh:minCount 1 ;
+        sh:minInclusive 0 ;
+        sh:message "A supplier link declares a lead time in days (delay)." ;
+    ] .
+
+# --- Inbound supply ---
+
+ekg:PurchaseOrderShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:PurchaseOrder ;
+    sh:property [
+        sh:path ekg:in_currency ;
+        sh:maxCount 1 ;
+        sh:message "A purchase order is recorded in at most one currency (in_currency)." ;
+    ] .
+
+ekg:PurchaseOrderLineShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:PurchaseOrderLine ;
+    sh:property [
+        sh:path ekg:product_qty ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:minExclusive 0 ;
+    ] ;
+    sh:property [
+        sh:path ekg:date_planned ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "An inbound line declares exactly one expected receipt date (date_planned)." ;
+    ] .
+
+# --- Inbound transport ---
+
+ekg:ShipmentShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:Shipment ;
+    sh:property [
+        sh:path ekg:eta ;
+        sh:datatype xsd:dateTime ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:message "A shipment declares exactly one ETA (scheduled_date), the logistics arrival compared against the promise." ;
+    ] ;
+    sh:property [
+        sh:path ekg:completed_at ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+        sh:message "A shipment carries at most one receipt-completion date (date_done), absent until the receipt is done." ;
+    ] .
+
+# --- Stock on hand and safety stock ---
+
+ekg:StockLevelShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:StockLevel ;
+    sh:property [
+        sh:path ekg:quantity ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:message "A stock level declares an on-hand quantity." ;
+    ] .
+
+ekg:ReorderRuleShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:ReorderRule ;
+    sh:property [
+        sh:path ekg:product_min_qty ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:minInclusive 0 ;
+        sh:message "A reorder rule declares the safety-stock minimum (product_min_qty)." ;
+    ] .
+
+# --- Parties ---
+
+ekg:PartyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:Party ;
+    sh:property [
+        sh:path ekg:supplier_rank ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+    ] ;
+    sh:property [
+        sh:path ekg:customer_rank ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+    ] .
+
+# --- Manufacturing process (own values) ---
+# Own datatype and cardinality only, no cross-entity sh:class (those are in
+# consistency-shapes.ttl, validated over the settled graph). Provenance is already
+# enforced globally by ekg:GovernedEntityShape above.
+
+ekg:ManufacturingOrderShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:ManufacturingOrder ;
+    sh:property [
+        sh:path ekg:lifecycle_state ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+        sh:message "A manufacturing order carries at most one lifecycle_state." ;
+    ] ;
+    sh:property [
+        sh:path ekg:startedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+    ] ;
+    sh:property [
+        sh:path ekg:endedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+    ] .
+
+ekg:WorkOrderShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:WorkOrder ;
+    sh:property [
+        sh:path ekg:lifecycle_state ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+    ] ;
+    sh:property [
+        sh:path ekg:startedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+    ] ;
+    sh:property [
+        sh:path ekg:endedAt ;
+        sh:datatype xsd:dateTime ;
+        sh:maxCount 1 ;
+    ] ;
+    sh:property [
+        sh:path ekg:duration_expected ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+    ] .
+
+ekg:WorkCenterShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:WorkCenter ;
+    sh:property [
+        sh:path ekg:name ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:message "A work center (agent) has a name." ;
+    ] ;
+    sh:property [
+        sh:path ekg:capacity ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+    ] ;
+    sh:property [
+        sh:path ekg:time_efficiency ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+    ] ;
+    sh:property [
+        sh:path ekg:cost_per_hour ;
+        sh:datatype xsd:decimal ;
+        sh:maxCount 1 ;
+    ] .
+
+ekg:OperationShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:Operation ;
+    sh:property [
+        sh:path ekg:op_sequence ;
+        sh:datatype xsd:integer ;
+        sh:maxCount 1 ;
+        sh:minInclusive 0 ;
+    ] ;
+    sh:property [
+        sh:path ekg:name ;
+        sh:datatype xsd:string ;
+        sh:maxCount 1 ;
+    ] .
+
+ekg:WorkCenterCapacityShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:WorkCenterCapacity ;
+    sh:property [
+        sh:path ekg:capacity ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:minInclusive 0 ;
+        sh:message "A work-center capacity record declares a capacity value." ;
+    ] .

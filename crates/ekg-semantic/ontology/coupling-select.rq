@@ -1,0 +1,58 @@
+# SELECT projection of the coupling rule the durable monitor groups coupled action points
+# by. Each row names two subject entities (?a ?b) that share a cause, and the ?kind of link:
+#
+#   * fulfills:   a sales order (?a) and a manufacturing order (?b) that ekg:fulfills it.
+#   * contention: two different manufacturing orders (?a ?b) with work orders on the same
+#                 work center (?via) whose planned windows overlap (strict interval
+#                 overlap, as in process-contention-select.rq). ?capacity is the center's
+#                 derived capacity and ?overlapPeers the anchor work order's count of
+#                 distinct overlapping peers, the same figures the contention rule reads.
+#
+# Whether a contention row couples is decided in Rust: only when the anchor is over
+# capacity (ontology::over_capacity, the predicate the contention rule and the scorer
+# share), so orders sharing a work center within its capacity stay apart.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?a ?b ?kind ?capacity ?overlapPeers ?via
+WHERE {
+    {
+        # fulfils: the sales order and each manufacturing order fulfilling it
+        ?b a ekg:ManufacturingOrder ;
+           ekg:fulfills ?a .
+        ?a a ekg:SalesOrder .
+        BIND("fulfills" AS ?kind)
+    }
+    UNION
+    {
+        # contention: the anchor work order of ?a, with its overlap count
+        {
+            SELECT ?wo ?via ?capacity ?a ?woStart ?woEnd
+                   (COUNT(DISTINCT ?peer) AS ?overlapPeers)
+            WHERE {
+                ?wo a ekg:WorkOrder ;
+                    ekg:performedBy ?via ;
+                    ekg:part_of     ?a ;
+                    ekg:startedAt   ?woStart ;
+                    ekg:endedAt     ?woEnd .
+                ?via ekg:capacity ?capacity .
+                ?peer a ekg:WorkOrder ;
+                      ekg:performedBy ?via ;
+                      ekg:startedAt   ?peerStart ;
+                      ekg:endedAt     ?peerEnd .
+                FILTER(?peer != ?wo)
+                FILTER(?woStart < ?peerEnd && ?peerStart < ?woEnd)
+            }
+            GROUP BY ?wo ?via ?capacity ?a ?woStart ?woEnd
+        }
+        # and each overlapping work order of a different order ?b on the same center
+        ?other a ekg:WorkOrder ;
+               ekg:performedBy ?via ;
+               ekg:part_of     ?b ;
+               ekg:startedAt   ?otherStart ;
+               ekg:endedAt     ?otherEnd .
+        FILTER(?other != ?wo && ?b != ?a)
+        FILTER(?woStart < ?otherEnd && ?otherStart < ?woEnd)
+        BIND("contention" AS ?kind)
+    }
+}

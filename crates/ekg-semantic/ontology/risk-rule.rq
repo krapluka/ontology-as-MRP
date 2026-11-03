@@ -1,0 +1,174 @@
+# The supply-risk rule.
+#
+# Deterministic, no language model: decides whether a sales order's delivery promise
+# (sale.order.commitment_date) can be met, from Odoo's own planning fields projected into the
+# world model. This CONSTRUCT is for inspection (it shows the finding as triples); nothing
+# materializes it. The live signal is its SELECT twin (risk-rule-select.rq), which the
+# monitor, the scorer and the read-model tabs evaluate at read time, so there is no stored
+# at-risk flag to go stale. A unit test keeps the two WHEREs identical; only the final
+# risk-IRI minting is specific to the CONSTRUCT.
+#
+# Coverage test, per component required to build the ordered product:
+#     available_by_commitment = on_hand
+#                             + sum of inbound purchase-order-line open qty
+#                                 (product_qty - qty_received)
+#                                 whose date_planned <= commitment_date
+#     shortfall = (required + safety_stock) - available_by_commitment
+#     shortfall > 0 means the promise is at risk on that component.
+#
+# On the seeded scenario this fires on the Battery: demand 10, on-hand 2, safety stock 5, and
+# the only inbound PO of 10 lands after the promise (excluded). The shortfall is
+# (10 + 5) - 2 = 13 > 0, so the VeloMax sales order is at_risk.
+#
+# Simplifications:
+#   - Multi-level BOM: reachability to a component is full-depth (property path), and
+#     per-component demand sums each BOM line's ratio times ordered qty over the BOM lines of
+#     the ordered product's own tree (a first-order roll-up: every line of the component in
+#     that tree counts once; another product's BOM never does). Intermediate multipliers are
+#     not rolled up recursively. Every BOM of a product in the tree is joined: Odoo's
+#     alternative BOMs (the contract ingests no BOM sequence or type) each add their lines.
+#   - Received units are on hand, not inbound: per line only product_qty - qty_received
+#     counts, and only while a shipment can still bring it. A PO whose shipments are all
+#     completed or cancelled ("no backorder", cancelled backorder) delivers nothing more.
+#     Only an open (not completed, not cancelled) delivering shipment's ETA stands in for the
+#     arrival; a PO with no shipment yet keeps its line's planned date. A cancelled purchase
+#     order delivers nothing.
+#   - Supplier lead time (product.supplierinfo.delay) is modeled but unused: the rule
+#     compares existing inbound receipts against the promise and needs no NOW().
+
+PREFIX ekg: <https://ekg.example/ontology#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+CONSTRUCT {
+    ?so ekg:at_risk true ;
+        ekg:has_risk ?risk .
+    ?risk a ekg:SupplyRisk ;
+          ekg:risk_component          ?comp ;
+          ekg:required_quantity       ?required ;
+          ekg:available_by_commitment ?available ;
+          ekg:safety_stock            ?safety ;
+          ekg:shortfall               ?shortfall ;
+          ekg:commitment_date         ?commitment .
+}
+WHERE {
+    {
+        SELECT ?so ?commitment ?comp ?required ?onHand ?safety
+               (SUM(IF(BOUND(?eta) && ?eta <= ?commitment, ?openQty, 0)) AS ?inbound)
+               (MAX(IF(BOUND(?shipEta) && ?shipEta > ?commitment, 1, 0)) AS ?lateShip)
+        WHERE {
+            # --- the promise under test ---
+            ?so a ekg:SalesOrder ;
+                ekg:commitment_date ?commitment .
+
+            # --- the order's requirement per component, at any BOM depth ---
+            # Sum of ordered quantity times BOM-line quantity (a first-order roll-up) over the
+            # order's lines and the BOM lines of each ordered product's own tree that use the
+            # component, each (order line, BOM line) once. Another product's BOM line never
+            # counts, and two lines of the component in one tree both do. The tabs' 30-day demand
+            # (suppliers-detail.rq) sums the same lines.
+            {
+                SELECT ?so ?comp (SUM(?lineRequired) AS ?required) WHERE {
+                    SELECT DISTINCT ?so ?line ?cline ?comp ?lineRequired WHERE {
+                        ?so ekg:has_line_of ?line .
+                        ?line ekg:line_product     ?finished ;
+                              ekg:product_uom_qty  ?orderQty .
+                        ?finished (^ekg:produces_product/ekg:has_line/ekg:component_product)* ?parent .
+                        ?pbom ekg:produces_product ?parent ;
+                              ekg:has_line         ?cline .
+                        ?cline ekg:component_product ?comp ;
+                               ekg:product_qty       ?compQty .
+                        BIND((?orderQty * ?compQty) AS ?lineRequired)
+                    }
+                } GROUP BY ?so ?comp
+            }
+
+            # on-hand: one scalar per component (an uncorrelated sub-select, so no
+            # cross-product with the inbound lines below)
+            OPTIONAL {
+                SELECT ?comp (SUM(?q) AS ?onHand) WHERE {
+                    ?sl a ekg:StockLevel ;
+                        ekg:stock_of ?comp ;
+                        ekg:quantity ?q .
+                } GROUP BY ?comp
+            }
+
+            # safety stock: one scalar per component
+            OPTIONAL {
+                SELECT ?comp (MAX(?min) AS ?safety) WHERE {
+                    ?rr a ekg:ReorderRule ;
+                        ekg:reorder_for      ?comp ;
+                        ekg:product_min_qty  ?min .
+                } GROUP BY ?comp
+            }
+
+            # inbound receipts, one row per line so the commitment-date filter applies
+            # before the SUM in the projection above. The arrival is the delivering
+            # shipment's ETA when a shipment fulfils the line's purchase order, else the
+            # line's planned date, so a slipped shipment ETA drops the inbound.
+            OPTIONAL {
+                ?pol a ekg:PurchaseOrderLine ;
+                     ekg:po_line_product ?comp ;
+                     ekg:product_qty     ?pq ;
+                     ekg:date_planned    ?planned .
+                # only the line's open quantity is inbound: what was already received is in
+                # the StockLevel sum above (counting it again would double it). Per line, so
+                # a partially received PO keeps its other lines' still-due quantity.
+                OPTIONAL { ?pol ekg:qty_received ?received }
+                BIND((?pq - COALESCE(?received, 0)) AS ?openQty)
+                FILTER(?openQty > 0)
+                # a cancelled purchase order delivers nothing (its lines keep their
+                # quantities in the source, so they must be excluded explicitly)
+                FILTER NOT EXISTS {
+                    ?cpo ekg:has_po_line ?pol ;
+                         ekg:lifecycle_state "cancel" .
+                }
+                # and only while a shipment can still bring it. A PO whose delivering
+                # shipments are all completed or cancelled delivers nothing more (Odoo's
+                # "no backorder" validation, or a cancelled backorder), so its unreceived
+                # rest is not inbound; a PO with no shipment yet keeps its planned date.
+                FILTER(
+                    NOT EXISTS {
+                        ?dpo ekg:has_po_line ?pol .
+                        ?dship a ekg:Shipment ; ekg:delivers ?dpo .
+                    }
+                    || EXISTS {
+                        ?opo ekg:has_po_line ?pol .
+                        ?oship a ekg:Shipment ; ekg:delivers ?opo .
+                        FILTER NOT EXISTS { ?oship ekg:completed_at ?oDone }
+                        FILTER NOT EXISTS { ?oship ekg:transport_status "cancel" }
+                    }
+                )
+                # earliest open delivering-shipment ETA per line (one value, so a PO with
+                # several shipments never double-counts the inbound); a completed receipt
+                # has already arrived and a cancelled one never will, so neither ETA
+                # speaks for what is still due
+                OPTIONAL {
+                    SELECT ?pol (MIN(?se) AS ?shipEta) WHERE {
+                        ?po ekg:has_po_line ?pol .
+                        ?ship a ekg:Shipment ;
+                              ekg:delivers ?po ;
+                              ekg:eta      ?se .
+                        FILTER NOT EXISTS { ?ship ekg:completed_at ?shipDone }
+                        FILTER NOT EXISTS { ?ship ekg:transport_status "cancel" }
+                    } GROUP BY ?pol
+                }
+                BIND(COALESCE(?shipEta, ?planned) AS ?eta)
+            }
+        }
+        GROUP BY ?so ?commitment ?comp ?required ?onHand ?safety
+    }
+
+    BIND(COALESCE(?onHand, 0)  AS ?oh)
+    BIND(COALESCE(?safety, 0)  AS ?ss)
+    BIND((?oh + ?inbound)      AS ?available)
+    BIND(((?required + ?ss) - ?available) AS ?shortfall)
+    FILTER(?shortfall > 0)
+
+    # stable IRI for the risk finding (no blank nodes, so it can be materialized):
+    # .../id/supply.risk/<sales-order-tail>::<component-tail>
+    BIND(IRI(CONCAT(
+        "https://ekg.example/id/supply.risk/",
+        STRAFTER(STR(?so),   "/id/"), "::",
+        STRAFTER(STR(?comp), "/id/")
+    )) AS ?risk)
+}

@@ -1,0 +1,153 @@
+#
+# EKG neutral core ontology: capability-agnostic vocabulary.
+#
+# This file carries only terms that name no use case, so every capability builds on
+# it unchanged. It holds two concerns:
+#
+#   1. Governance base and provenance: `ekg:GovernedEntity` (the base class the
+#      WorldModel driver types every materialized entity with) and the `ekg:SourceRecord`
+#      provenance vocabulary.
+#
+#   2. A PROV-aligned process metamodel: activity / agent / artifact / state and the
+#      verbs that relate them, mirroring the W3C PROV triad (prov:Activity /
+#      prov:Entity / prov:Agent) the engine already touches via ekg:wasDerivedFrom
+#      (= prov:wasDerivedFrom). Capability process classes specialise these
+#      (rdfs:subClassOf in the capability file).
+#
+# A unit test fails if a capability-specific term appears here. The file shares the single
+# `ekg:` vocabulary namespace with the capability ontologies; the neutral boundary is the
+# file and the test, not a separate namespace. Loaded into its own ontology named graph
+# (https://ekg.example/graph/ontology-core) by graphdb-provision.sh and embedded via
+# include_str! (ontology::CORE_TTL) so on-disk and compiled agree.
+
+@prefix ekg:  <https://ekg.example/ontology#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://ekg.example/core>
+    a owl:Ontology ;
+    rdfs:label "EKG Neutral Core" ;
+    rdfs:comment "Capability-agnostic governance base + PROV-aligned process metamodel." ;
+    owl:versionInfo "0.1.0" .
+
+# --- Governance base class (neutral) ---
+# Every entity the world model materializes is an ekg:GovernedEntity; the WorldModel
+# driver types it so. The SHACL write-shapes target this class globally to make
+# provenance mandatory on the write path regardless of domain type.
+ekg:GovernedEntity
+    a owl:Class ;
+    rdfs:label "Governed Entity" ;
+    rdfs:comment "Base class of every materialized entity in the world model; carries the mandatory-provenance guarantee." .
+
+# --- Provenance ---
+# Every node and edge traces to a governed source fact. ekg:wasDerivedFrom
+# (= prov:wasDerivedFrom) links a materialized node to the source record it was
+# pulled from; the SHACL write-shapes make this mandatory.
+
+ekg:SourceRecord
+    a owl:Class ;
+    rdfs:label "Source Record" ;
+    rdfs:comment "The provenance root of a materialized node: the authoritative record in a source system of record (e.g. an Odoo model row)." .
+
+ekg:wasDerivedFrom
+    a owl:ObjectProperty ;
+    rdfs:label "was derived from" ;
+    rdfs:comment "Provenance: the source record this node/edge was materialized from (aligns prov:wasDerivedFrom)." ;
+    rdfs:range ekg:SourceRecord .
+
+ekg:source_system
+    a owl:DatatypeProperty ;
+    rdfs:label "source system" ;
+    rdfs:comment "Source system identifier, e.g. \"odoo\"." ;
+    rdfs:domain ekg:SourceRecord ;
+    rdfs:range xsd:string .
+
+ekg:source_model
+    a owl:DatatypeProperty ;
+    rdfs:label "source model" ;
+    rdfs:comment "Source model name, e.g. \"sale.order\"." ;
+    rdfs:domain ekg:SourceRecord ;
+    rdfs:range xsd:string .
+
+ekg:source_id
+    a owl:DatatypeProperty ;
+    rdfs:label "source id" ;
+    rdfs:comment "Source primary key of the record." ;
+    rdfs:domain ekg:SourceRecord ;
+    rdfs:range xsd:long .
+
+ekg:revision
+    a owl:DatatypeProperty ;
+    rdfs:label "revision" ;
+    rdfs:comment "Per-entity monotonic revision at which this node was materialized (matches ekg-domain::Revision)." ;
+    rdfs:range xsd:long .
+
+# --- Process metamodel (PROV-aligned, neutral) ---
+# The four upper classes mirror the W3C PROV triad plus a lifecycle state. They name
+# no domain; capability process classes specialise them (rdfs:subClassOf) in the
+# capability ontology. The verbs relating them carry no rdfs:domain, so they attach across
+# activity/agent/artifact classes without RDFS domain entailment mis-typing nodes.
+
+ekg:Activity
+    a owl:Class ;
+    rdfs:label "Activity" ;
+    rdfs:comment "Something performed over a period of time that acts on artifacts (aligns prov:Activity). A capability specialises this (e.g. a manufacturing order or work order)." .
+
+ekg:Agent
+    a owl:Class ;
+    rdfs:label "Agent" ;
+    rdfs:comment "Who or what performs an activity and bears responsibility (aligns prov:Agent): a machine resource, a human, or an automated service, represented uniformly." .
+
+ekg:Artifact
+    a owl:Class ;
+    rdfs:label "Artifact" ;
+    rdfs:comment "An object an activity consumes or produces (aligns prov:Entity)." .
+
+ekg:ProcessState
+    a owl:Class ;
+    rdfs:label "Process State" ;
+    rdfs:comment "A lifecycle state an activity (or artifact) is in. Reified state individuals are optional; the substrate carries state as the ekg:lifecycle_state literal." .
+
+ekg:performedBy
+    a owl:ObjectProperty ;
+    rdfs:label "performed by" ;
+    rdfs:comment "The agent that performs an activity (aligns prov:wasAssociatedWith). No domain: attaches to any activity." ;
+    rdfs:range ekg:Agent .
+
+ekg:used
+    a owl:ObjectProperty ;
+    rdfs:label "used" ;
+    rdfs:comment "An artifact an activity consumes as input (aligns prov:used). No domain." ;
+    rdfs:range ekg:Artifact .
+
+ekg:produced
+    a owl:ObjectProperty ;
+    rdfs:label "produced" ;
+    rdfs:comment "An artifact an activity generates as output (inverse of prov:wasGeneratedBy). No domain." ;
+    rdfs:range ekg:Artifact .
+
+ekg:precedes
+    a owl:ObjectProperty ;
+    rdfs:label "precedes" ;
+    rdfs:comment "Directed ordering between activities: this activity comes before the referenced one. No domain." ;
+    rdfs:range ekg:Activity .
+
+ekg:startedAt
+    a owl:DatatypeProperty ;
+    rdfs:label "started at" ;
+    rdfs:comment "When an activity started/is planned to start (aligns prov:startedAtTime). No domain." ;
+    rdfs:range xsd:dateTime .
+
+ekg:endedAt
+    a owl:DatatypeProperty ;
+    rdfs:label "ended at" ;
+    rdfs:comment "When an activity finished/is planned to finish (aligns prov:endedAtTime). No domain." ;
+    rdfs:range xsd:dateTime .
+
+ekg:lifecycle_state
+    a owl:DatatypeProperty ;
+    rdfs:label "lifecycle state" ;
+    rdfs:comment "The source lifecycle state token of an activity (e.g. draft/confirmed/progress/done). No domain; shared across activity classes." ;
+    rdfs:range xsd:string .

@@ -1,0 +1,68 @@
+# Serve the built Plant Pulse bundle and reverse-proxy the governed API to the backend.
+# The stock entrypoint runs envsubst over this template at container start, restricted by
+# NGINX_ENVSUBST_FILTER (Dockerfile) to `${EKG_API_UPSTREAM}` and `${NGINX_RESOLVER}` (the latter
+# derived by 16-ekg-proxy-env.envsh). nginx runtime variables ($host, $uri, $api) are kept.
+#
+# Runs unprivileged on 8080 with no version disclosure and security headers on every
+# response. A missing asset is a 404, not the app page, and the API upstream is resolved per
+# request so a recreated backend is reached again without restarting nginx.
+
+server {
+    listen       8080;
+    server_name  _;
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    server_tokens off;
+    # Redirects (e.g. a directory to its trailing "/") stay relative, so they survive the host
+    # port mapping (3000 to 8080) instead of pointing the browser at the container port.
+    absolute_redirect off;
+
+    include /etc/nginx/snippets/security-headers.conf;
+
+    # Per-request upstream resolution: with a variable in `proxy_pass`, nginx resolves the name
+    # through `resolver` at request time (cached for `valid`) instead of once at startup.
+    resolver ${NGINX_RESOLVER} valid=10s;
+    resolver_timeout 5s;
+
+    # The API is reverse-proxied so the app stays same-origin and keeps calling relative /api
+    # (no CORS). `$api` is scheme://host[:port] with no path (enforced at start), so nginx
+    # forwards the original request URI, path and query string, unchanged. No `add_header`
+    # here, so the server-level security headers apply to proxied responses as well.
+    location /api/ {
+        set $api ${EKG_API_UPSTREAM};
+        proxy_pass $api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # A command may run until its claim deadline (EKG_COMMAND_CLAIM_SECS, 600 s by default:
+        # up to 4 write-back actions of 60 s each plus the rollback). nginx must not cut it off
+        # earlier and turn a still-running command into a false failure. Connecting and sending
+        # stay short.
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    60s;
+        proxy_read_timeout    600s;
+    }
+
+    # Content-hashed build output: cache forever; a missing file is a 404, not index.html.
+    location /assets/ {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    # The app shell: always revalidated, so a new build's asset hashes are picked up at once.
+    location = /index.html {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # SPA history fallback: unknown client-side routes resolve to index.html (served by the
+    # exact-match location above, with its headers).
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

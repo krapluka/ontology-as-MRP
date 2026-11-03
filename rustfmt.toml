@@ -1,0 +1,5 @@
+# Stable-only rustfmt options (no nightly-gated keys, so `cargo fmt` works on stable).
+edition = "2024"
+max_width = 100
+newline_style = "Unix"
+use_field_init_shorthand = true

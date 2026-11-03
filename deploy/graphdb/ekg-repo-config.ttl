@@ -1,0 +1,50 @@
+#
+# GraphDB repository configuration for the EKG world model, for reference only.
+# `just graphdb-provision` does not use this file: it creates the repo via the JSON
+# REST config so SHACL validate-on-write can be enabled (`isShacl=true`).
+#
+# This Turtle sail config cannot enable SHACL: the `graphdb:isShacl` predicate is a
+# no-op here, and GraphDB cannot toggle SHACL after creation. It documents the
+# ruleset, index and base-URL settings; scripts/graphdb-provision.sh provisions.
+#
+# RDFS-Plus optimized ruleset so class/property hierarchies materialize without
+# full OWL-DL cost. The repository id `ekg` is capability-neutral.
+
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rep:     <http://www.openrdf.org/config/repository#> .
+@prefix sr:      <http://www.openrdf.org/config/repository/sail#> .
+@prefix sail:    <http://www.openrdf.org/config/sail#> .
+@prefix graphdb: <http://www.ontotext.com/config/graphdb#> .
+
+[] a rep:Repository ;
+    rep:repositoryID "ekg" ;
+    rdfs:label "EKG world model" ;
+    rep:repositoryImpl [
+        rep:repositoryType "graphdb:SailRepository" ;
+        sr:sailImpl [
+            sail:sailType "graphdb:Sail" ;
+
+            graphdb:read-only "false" ;
+
+            # Inference: RDFS + OWL property axioms (sub-class/-property, domain,
+            # range, inverse), optimized. Matches the ontology's OWL-Lite shape.
+            graphdb:ruleset "rdfsplus-optimized" ;
+            graphdb:disable-sameAs "true" ;
+            graphdb:check-for-inconsistencies "false" ;
+
+            # Context index on: the world model is named-graph-per-entity, so
+            # context-scoped queries (per-entity provenance) must be fast.
+            graphdb:entity-id-size "32" ;
+            graphdb:enable-context-index "true" ;
+            graphdb:enablePredicateList "true" ;
+
+            graphdb:query-timeout "0" ;
+            graphdb:query-limit-results "0" ;
+            graphdb:throw-QueryEvaluationException-on-timeout "false" ;
+
+            graphdb:base-URL "https://ekg.example/" ;
+            graphdb:defaultNS "" ;
+            graphdb:in-memory-literal-properties "true" ;
+            graphdb:enable-literal-index "true" ;
+        ]
+    ] .

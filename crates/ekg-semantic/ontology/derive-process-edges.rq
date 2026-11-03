@@ -1,0 +1,55 @@
+#
+# Derive the process edges that are not direct source fields. Resolving them here keeps
+# multi-hop reads out of the ingestor.
+#
+#   * ekg:used:     a manufacturing order consumes its BOM's components.
+#   * ekg:fulfills: a manufacturing order fulfils the sales order whose name equals
+#                   the order's origin reference.
+#   * ekg:capacity: a work-center agent's capacity, the max over its capacity
+#                   records, so the agent carries a single value.
+#
+# The derived edges live in their own overlay graph, which is cleared before each
+# re-derivation, so an edge whose source entity was dropped or changed does not survive.
+# The ekg:capacity value on a WorkCenterCapacity record comes from the source and lives
+# in its own entity graph; the CLEAR does not touch it. Run in the provisioning path,
+# never the monitor.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+CLEAR SILENT GRAPH <https://ekg.example/graph/derived/process-edges> ;
+
+# --- ekg:used = the components of the order's BOM ---
+INSERT {
+    GRAPH <https://ekg.example/graph/derived/process-edges> { ?mo ekg:used ?comp }
+}
+WHERE {
+    ?mo  a ekg:ManufacturingOrder ;
+         ekg:builds_from ?bom .
+    ?bom ekg:has_line ?line .
+    ?line ekg:component_product ?comp .
+} ;
+
+# --- ekg:fulfills = the sales order whose name matches the order's origin ---
+INSERT {
+    GRAPH <https://ekg.example/graph/derived/process-edges> { ?mo ekg:fulfills ?so }
+}
+WHERE {
+    ?mo a ekg:ManufacturingOrder ;
+        ekg:origin_ref ?origin .
+    ?so a ekg:SalesOrder ;
+        ekg:name ?name .
+    FILTER(str(?origin) = str(?name))
+} ;
+
+# --- ekg:capacity on the agent = max of its capacity records ---
+INSERT {
+    GRAPH <https://ekg.example/graph/derived/process-edges> { ?wc ekg:capacity ?cap }
+}
+WHERE {
+    SELECT ?wc (MAX(?c) AS ?cap) WHERE {
+        ?rec a ekg:WorkCenterCapacity ;
+             ekg:capacity_of ?wc ;
+             ekg:capacity ?c .
+    }
+    GROUP BY ?wc
+}

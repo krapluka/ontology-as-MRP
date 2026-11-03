@@ -1,0 +1,46 @@
+# Fragment, not a query: the single definition of an "open inbound" purchase-order line,
+# spliced into every tab query at its OPEN_INBOUND marker by `ekg_semantic::tabs`. It restates
+# the risk rule's receipt logic (risk-rule-select.rq) per line, so the tabs show the same
+# inbound the rule counts:
+#
+#   - only the line's open quantity is inbound: product_qty - qty_received > 0;
+#   - a cancelled purchase order delivers nothing;
+#   - the open rest counts only while a shipment can still bring it: the PO has no delivering
+#     shipment yet, or at least one open one (neither completed nor cancelled);
+#   - its arrival is the earliest open delivering shipment's ETA, else the line's planned date.
+#
+# A self-contained sub-select, so its helper variables never leak into (or get captured by) the
+# host query. It projects, per open line: ?ib_po (the purchase order), ?ib_pol (the line),
+# ?ib_product (the line's product), ?ib_open (its open quantity) and ?ib_arrival.
+{
+    SELECT ?ib_po ?ib_pol ?ib_product ?ib_open ?ib_arrival WHERE {
+        ?ib_po a ekg:PurchaseOrder ;
+               ekg:has_po_line ?ib_pol .
+        ?ib_pol a ekg:PurchaseOrderLine ;
+                ekg:po_line_product ?ib_product ;
+                ekg:product_qty     ?ib_qty ;
+                ekg:date_planned    ?ib_planned .
+        OPTIONAL { ?ib_pol ekg:qty_received ?ib_received }
+        BIND((?ib_qty - COALESCE(?ib_received, 0)) AS ?ib_open)
+        FILTER(?ib_open > 0)
+        FILTER NOT EXISTS { ?ib_po ekg:lifecycle_state "cancel" }
+        FILTER(
+            NOT EXISTS { ?ib_dship a ekg:Shipment ; ekg:delivers ?ib_po . }
+            || EXISTS {
+                ?ib_oship a ekg:Shipment ; ekg:delivers ?ib_po .
+                FILTER NOT EXISTS { ?ib_oship ekg:completed_at ?ib_odone }
+                FILTER NOT EXISTS { ?ib_oship ekg:transport_status "cancel" }
+            }
+        )
+        OPTIONAL {
+            SELECT ?ib_po (MIN(?ib_se) AS ?ib_ship_eta) WHERE {
+                ?ib_ship a ekg:Shipment ;
+                         ekg:delivers ?ib_po ;
+                         ekg:eta      ?ib_se .
+                FILTER NOT EXISTS { ?ib_ship ekg:completed_at ?ib_sdone }
+                FILTER NOT EXISTS { ?ib_ship ekg:transport_status "cancel" }
+            } GROUP BY ?ib_po
+        }
+        BIND(COALESCE(?ib_ship_eta, ?ib_planned) AS ?ib_arrival)
+    }
+}

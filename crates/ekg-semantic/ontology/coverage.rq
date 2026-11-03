@@ -1,0 +1,24 @@
+# Delivery judgment input: the open inbound of each short component, ordered by arrival. It
+# uses the shared open-inbound definition, so it is the same inbound the risk rule counts.
+# Run only for a non-empty component set (an empty VALUES block would return nothing). The
+# components placeholder is replaced only with IRIs `ontology::canonical_subject` rebuilt.
+#
+# `ekg_semantic::display` accumulates ?open from the row's on-hand in arrival order: the first
+# arrival at which on hand + cumulative open inbound covers the order's requirement is that
+# component's coverage date (none if it never does).
+#
+# Shared inbound is not allocated across orders: two orders short of the same component can
+# each count the same line toward their coverage, as the rule does. The coverage date is the
+# rule's view, not an allocation.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?comp ?open ?arrival
+WHERE {
+    {{OPEN_INBOUND}}
+    BIND(?ib_product AS ?comp)
+    BIND(?ib_open AS ?open)
+    BIND(?ib_arrival AS ?arrival)
+    VALUES ?comp { {{COMPONENTS}} }
+}
+ORDER BY ?comp ?arrival ?ib_pol

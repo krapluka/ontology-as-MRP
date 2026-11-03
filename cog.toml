@@ -1,0 +1,24 @@
+# cocogitto: Rust-native conventional commit verification + version bumping.
+# https://docs.cocogitto.io/
+from_latest_tag = false
+ignore_merge_commits = true
+generate_mono_repository_global_tag = true
+branch_whitelist = ["main", "develop", "feature/*", "fix/*", "hotfix/*", "refactor/*", "chore/*", "docs/*", "test/*", "experiment/*"]
+
+# Standard conventional types (feat/fix are built in); the rest mirror the
+# team's commitlint set so consistent history across the team.
+[commit_types]
+perf = { changelog_title = "Performance" }
+docs = { changelog_title = "Documentation" }
+style = { changelog_title = "Style" }
+refactor = { changelog_title = "Refactoring" }
+test = { changelog_title = "Tests" }
+build = { changelog_title = "Build" }
+ci = { changelog_title = "CI" }
+chore = { changelog_title = "Miscellaneous" }
+revert = { changelog_title = "Revert" }
+
+[changelog]
+# Changelog rendering is delegated to git-cliff (see cliff.toml); cocogitto is
+# used here for commit-message verification and semver bumping only.
+path = "CHANGELOG.md"

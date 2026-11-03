@@ -1,0 +1,17 @@
+# Display input: a purchase-order line's current arrival, the "from" of an expedite. It is the
+# rule's own arrival (the shared open-inbound definition: its earliest open receipt's ETA, else
+# its planned date), falling back to the planned date for a line with nothing open.
+# `<urn:ekg:subject>` is replaced only with an IRI `ontology::canonical_subject` rebuilt.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?arrival ?planned
+WHERE {
+    OPTIONAL { <urn:ekg:subject> ekg:date_planned ?planned }
+    OPTIONAL {
+        {{OPEN_INBOUND}}
+        FILTER(?ib_pol = <urn:ekg:subject>)
+        BIND(?ib_arrival AS ?arrival)
+    }
+}
+LIMIT 1

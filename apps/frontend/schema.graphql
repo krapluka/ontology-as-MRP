@@ -1,0 +1,773 @@
+"""
+An action point as the list card shows it: its id, the subject it is keyed by, its
+current state, the deterministic reason the monitor opened it, and its short digest.
+"""
+type ActionPoint {
+	"""
+	Stable action-point id.
+	"""
+	id: ID!
+	"""
+	The subject entity this point is keyed by.
+	"""
+	subject: ID!
+	"""
+	Current lifecycle state.
+	"""
+	state: ActionPointState!
+	"""
+	The deterministic reason the monitor opened it (not model-generated).
+	"""
+	reason: String!
+	"""
+	The point's short digest: the digest that names a portfolio and a plan, over the
+	point's subject, so a client can show a short, reproducible point id without
+	re-implementing the function.
+	"""
+	digest: String!
+	"""
+	The point's short display code: four hex digits from [`display_code`] over its id, shown
+	as `AP-XXXX`.
+	"""
+	code: String!
+}
+
+"""
+The lifecycle state of an action point, mirroring [`ActionPointState`].
+"""
+enum ActionPointState {
+	"""
+	Raised by the monitor; awaiting a proposal.
+	"""
+	OPEN
+	"""
+	The bounded agent attached a grounded proposal.
+	"""
+	PROPOSED
+	"""
+	A human is reviewing (oversight in progress).
+	"""
+	UNDER_REVIEW
+	"""
+	A human (or the auto-apply policy) promoted the plan; the write-back ran.
+	"""
+	PROMOTED
+	"""
+	A human aborted it via the stop control.
+	"""
+	ABORTED
+	"""
+	A promoted change was reversed through its inverse.
+	"""
+	REVERSED
+	"""
+	It expired via an escalation timer without promotion.
+	"""
+	EXPIRED
+}
+
+"""
+A change an agent auto-applied under policy, listed with the criteria it satisfied
+and the window within which it may still be reversed. The changes carry their recorded
+inverse (they are executed), so the governed undo can reverse them.
+"""
+type AppliedChange {
+	"""
+	The action point whose plan was auto-applied.
+	"""
+	actionPoint: ID!
+	"""
+	The subject the plan resolved.
+	"""
+	subject: ID!
+	"""
+	The change's short display code, shown as `AU-XXXX`: [`display_code`] over
+	`applied/` plus the action point's id.
+	"""
+	code: String!
+	"""
+	The display code of the action point it closed, shown as `AP-XXXX`: the point's own
+	[`ActionPointView::code`].
+	"""
+	actionPointCode: String!
+	"""
+	The changes that were committed, each with its recorded inverse.
+	"""
+	changes: [Change!]!
+	"""
+	The policy criteria this auto-apply satisfied.
+	"""
+	criteria: [Criterion!]!
+	"""
+	When it was applied, as Unix epoch seconds (stringly).
+	"""
+	appliedAt: String
+	"""
+	The end of the reversal window, as Unix epoch seconds; an undo after this is
+	refused. `null` if the applied time is unknown.
+	"""
+	undoUntil: String
+	"""
+	Whether every committed change is reversible (an undo can reverse the whole plan).
+	"""
+	reversible: Boolean!
+	"""
+	The opaque, capability-filled display bag for this auto-applied change: a composed
+	`title` (its verbs) and `effect` sentence (its changes), so the view need not fabricate
+	prose. Rides the same neutral [`Metric`] container as a score's metrics; the contract
+	names none of the keys.
+	"""
+	metrics: [Metric!]!
+}
+
+"""
+A plan an operator approved: a promoted portfolio, or a point a human promoted on its own,
+with what was approved and until when it can be undone.
+"""
+type ApprovedPlan {
+	"""
+	The plan id (the same rule as a listed plan's).
+	"""
+	id: ID!
+	"""
+	The plan's short display code (the same rule as a listed plan's).
+	"""
+	code: String!
+	"""
+	The points the plan resolved.
+	"""
+	resolves: [ActionPoint!]!
+	"""
+	The portfolio whose plan was approved, or `null` for a single point.
+	"""
+	portfolio: PortfolioRef
+	"""
+	The approved option's `rank_key`, when recorded (opaque).
+	"""
+	rankKey: String
+	"""
+	The committed changes, each with its recorded inverse.
+	"""
+	changes: [Change!]!
+	"""
+	Who approved it.
+	"""
+	reviewer: String!
+	"""
+	Their rationale.
+	"""
+	rationale: String!
+	"""
+	When it was approved, as Unix epoch seconds.
+	"""
+	promotedAt: String
+	"""
+	When its reversal window closes, as Unix epoch seconds. An undo after it is refused.
+	"""
+	undoUntil: String
+	"""
+	Whether every committed change is reversible.
+	"""
+	reversible: Boolean!
+	"""
+	How many of its committed changes are still unreversed after a partial undo (0 when
+	no undo ran).
+	"""
+	remaining: Int!
+}
+
+"""
+One before/after bar on a work-center lane: a work order, its planned window, its row
+(for stacking), and whether this option's changes moved it.
+"""
+type Bar {
+	"""
+	The work order this bar represents.
+	"""
+	workOrder: ID!
+	"""
+	Planned start (as materialized).
+	"""
+	start: String!
+	"""
+	Planned end (as materialized).
+	"""
+	end: String!
+	"""
+	The row for stacking overlapping bars on the lane.
+	"""
+	row: Int!
+	"""
+	Whether this option's proposed changes moved this bar between before and after.
+	"""
+	changed: Boolean!
+}
+
+"""
+One governed change an option would commit: the verb, the target object, its
+parameters (the intended new values) and the target's from value. An executed change
+(an auto-applied one) also carries the recorded inverse that reverses it; for an option
+not yet promoted the inverse is `null`, since it is only recorded once the write-back
+runs. The `params` carry the to value, so `from` plus `params` give the change's from
+and to.
+"""
+type Change {
+	"""
+	The governed verb (defined by the kinetic layer).
+	"""
+	verb: String!
+	"""
+	The entity the change targets.
+	"""
+	object: ID!
+	"""
+	The change parameters (the intended new value(s)), key-ordered.
+	"""
+	params: [ChangeParam!]!
+	"""
+	The recorded inverse that reverses this change, present only once executed.
+	"""
+	inverse: String
+	"""
+	The change's from value: the target's current value of the fact the verb moves, as
+	the capability reads it. An expedite's from is its line's current arrival, and a change
+	that moves no fact (a notification) has none. For an executed change this is the
+	recorded prior; for an option not yet promoted it is read live from the world model.
+	`null` when the fact is unknown or unread.
+	"""
+	from: String
+	"""
+	A display label for the change's object, composed by the capability from the
+	materialized names (for example an order line as its order reference, open quantity
+	and product). `null` when no name is materialized; the view then falls back to the
+	object id.
+	"""
+	label: String
+}
+
+"""
+One parameter of a change (e.g. the new date), stringly like the neutral core.
+"""
+type ChangeParam {
+	"""
+	The parameter name.
+	"""
+	key: String!
+	"""
+	Its value.
+	"""
+	value: String!
+}
+
+"""
+One policy criterion an auto-applied change satisfied (or the active policy exposes):
+a rule name and its threshold/value.
+"""
+type Criterion {
+	"""
+	The rule (e.g. `cost_within_limit`, `single_step_reversible`).
+	"""
+	rule: String!
+	"""
+	Its threshold / value (e.g. the cost limit).
+	"""
+	value: String!
+}
+
+"""
+An entity id's display label: the name an operator reads for it, composed by the
+capability from the world model. A display projection (texts keep their ids), served
+only for an id the world can name.
+"""
+type EntityLabel {
+	"""
+	The entity id, exactly as asked.
+	"""
+	id: ID!
+	"""
+	The label to show for it.
+	"""
+	label: String!
+}
+
+"""
+One field of a projection row (a SPARQL solution binding of a variable to a term).
+"""
+type Field {
+	"""
+	The projection column / SPARQL variable name.
+	"""
+	key: String!
+	"""
+	Its term value.
+	"""
+	value: String!
+}
+
+"""
+A work-center lane: its capacity band plus the "before" (current) and "after" (under
+the option's changes) bars. A projection read, never a persisted artifact.
+"""
+type Lane {
+	"""
+	The work-center agent this lane belongs to.
+	"""
+	workCenter: ID!
+	"""
+	The agent's parallel capacity, if materialized.
+	"""
+	capacity: Float
+	"""
+	The current schedule's bars.
+	"""
+	before: [Bar!]!
+	"""
+	The schedule's bars under this option's proposed changes.
+	"""
+	after: [Bar!]!
+}
+
+"""
+One entry of the opaque, capability-filled metrics bag. The schema enumerates no metric
+name: `key`/`value` carry whatever the capability's scorer (and the derived display
+metrics) put there. Delivery/cost ride this bag unnamed.
+"""
+type Metric {
+	"""
+	The capability-defined metric name (opaque to the contract).
+	"""
+	key: String!
+	"""
+	Its value, stringly like every neutral field.
+	"""
+	value: String!
+}
+
+"""
+A structured reason a candidate cannot be auto-applied and needs a human: the policy
+predicate it fails, carried as data so oversight sees why a plan waits without parsing
+prose.
+"""
+type Need {
+	"""
+	A stable, capability-defined reason code.
+	"""
+	code: String!
+	"""
+	A human-readable detail for the reason.
+	"""
+	detail: String!
+}
+
+"""
+A plan: a ranked slate over the points it resolves. `resolves` is a list, so a plan that
+resolves one point and a portfolio's joint plan that resolves several are the same
+contract.
+"""
+type Plan {
+	"""
+	The action-point subject this plan was read for (a listed plan: its lead point).
+	"""
+	subject: ID!
+	"""
+	The action points this plan resolves: the one point, or every member of its portfolio.
+	"""
+	resolves: [ID!]!
+	"""
+	The point whose baseline frames the plan: the one it resolves, or the member with the
+	worst baseline. The baseline and every option's display metrics are judged for it.
+	"""
+	lead: ID!
+	"""
+	The do-nothing baseline score (the outcome if no action is taken).
+	"""
+	baseline: Score!
+	"""
+	The ranked options, best-first.
+	"""
+	options: [PlanOption!]!
+	"""
+	The slate-level reasoning trace over the whole loop (incl. rejected candidates).
+	"""
+	trace: Trace!
+}
+
+"""
+One plan awaiting oversight, shown as one inbox row: the joint plan of an active portfolio,
+or the plan of a single awaiting point in no active portfolio.
+"""
+type PlanEntry {
+	"""
+	The plan id: `plan/` plus the digest of the sorted points it resolves. This is the digest
+	that names a portfolio, so a portfolio's plan id and its portfolio id share one digest.
+	"""
+	id: ID!
+	"""
+	The plan's short display code, shown as `PL-XXXX`: `display_code` over the plan id.
+	"""
+	code: String!
+	"""
+	The points the plan resolves, each with its state and reason.
+	"""
+	resolves: [ActionPoint!]!
+	"""
+	The portfolio the plan resolves, or `null` for a single point.
+	"""
+	portfolio: PortfolioRef
+	"""
+	When the plan's current slate was attached, as Unix epoch seconds; `null` while it is
+	pending, or for a slate attached before the time was recorded.
+	"""
+	openedAt: String
+	"""
+	Why the points need a plan: a portfolio's coupling reasons for its current generation,
+	or the point's reason.
+	"""
+	situation: String!
+	"""
+	The plan itself (its options, reasoning, lanes and framing, as a point's plan read
+	serves them), or `null` while its slate is pending. A failure to read one entry's plan
+	is reported on this field only; the list is still served.
+	"""
+	plan: Plan
+}
+
+"""
+One ranked option on a plan's slate: its changes, the policy `needs` that keep it
+human-gated, whether it is recommended, its reasoning-trace slice, and (resolved on
+demand) its opaque display metrics and before/after work-center lanes.
+
+The plan, subject, and the scorer's raw metrics are carried but not exposed as fields
+(`skip`); they back the derived `metrics`/`lanes` resolvers.
+"""
+type PlanOption {
+	"""
+	Whether this option is the agent's recommended one (at most one per slate).
+	"""
+	recommended: Boolean!
+	"""
+	The capability-defined ordering value (best-first); ranking is authoritative.
+	"""
+	rankKey: String!
+	"""
+	The policy reasons this option cannot be auto-applied (empty if none).
+	"""
+	needs: [Need!]!
+	"""
+	The governed changes this option would commit, in listed order.
+	"""
+	changes: [Change!]!
+	"""
+	This option's reasoning-trace slice.
+	"""
+	trace: Trace!
+	"""
+	The opaque display-metrics bag: the scorer's stored metrics plus the delivery and cost
+	display metrics derived read-only from this option's plan. Display-only: they do not
+	change the ranking (`rank_key`). Computed only when the field is selected.
+	"""
+	metrics: [Metric!]!
+	"""
+	The before/after per-work-center lanes for this option: the current world-model
+	schedule ("before") and the schedule under this option's proposed changes ("after"),
+	derived as a projection read that writes nothing. Computed only when the field is
+	selected.
+	"""
+	lanes: [Lane!]!
+	"""
+	The option's scope: how many distinct objects its changes touch, per kind, counted
+	by the capability's stated rule over the world model. The kinds are data, never schema
+	names; a kind with none is omitted, and a failed read omits the scope rather than
+	estimating it. Computed only when the field is selected.
+	"""
+	scope: [ScopeCount!]!
+}
+
+"""
+The active auto-apply policy as the operator sees it: the criteria a change must
+meet, the reversal window, and the pre-authorized verbs.
+"""
+type Policy {
+	"""
+	The policy version id.
+	"""
+	policyId: String!
+	"""
+	The criteria a change must satisfy to be auto-applied.
+	"""
+	criteria: [Criterion!]!
+	"""
+	The currency the cost limit is expressed in (ISO 4217 code), when configured.
+	"""
+	costLimitCurrency: String
+	"""
+	A human-readable statement of the reversal window (e.g. "reversible for 8h").
+	"""
+	undoWindow: String!
+	"""
+	The verbs the policy pre-authorizes for auto-apply.
+	"""
+	autoApplyActions: [String!]!
+}
+
+"""
+A portfolio a plan resolves, as its commands need it: its id and current generation.
+"""
+type PortfolioRef {
+	"""
+	The portfolio id (`portfolio/…`).
+	"""
+	id: ID!
+	"""
+	The generation the plan belongs to, which a portfolio command must carry.
+	"""
+	generation: Int!
+}
+
+"""
+One row of a read-model tab projection: a neutral set of key/value fields (a SPARQL
+solution). The tabs differ by which projection query runs, not by the row shape.
+"""
+type ProjectionRow {
+	"""
+	The row's fields, key-ordered.
+	"""
+	fields: [Field!]!
+}
+
+type Query {
+	"""
+	The action-point list, optionally filtered to one lifecycle `state`. Reads the
+	durable state via the admin introspection (as the REST list does); commits nothing.
+	"""
+	actionPoints(state: ActionPointState): [ActionPoint!]!
+	"""
+	One action point's plan for `subject`: the do-nothing baseline, each ranked option
+	(its changes, `needs`, opaque display metrics, scope, recommended flag, reasoning-trace
+	slice), and the slate-level trace. While the point is a member of an active portfolio,
+	its plan is the portfolio's joint slate for the current generation, resolving every
+	member; otherwise its own slate. `None` if the subject has no point or its plan is
+	still pending, never a member's pre-join per-point slate.
+	"""
+	plan(subject: ID!): Plan
+	"""
+	The plans awaiting oversight, one inbox row each: the joint plan of every active
+	portfolio, and the plan of every awaiting point in no active portfolio, newest slate
+	first. A plan whose slate is pending is listed with no plan; a plan that cannot be
+	read is reported on its own `plan` field. Commits nothing.
+	"""
+	plans: [PlanEntry!]!
+	"""
+	The plans approved by a human: promoted portfolios, and points a human promoted on
+	their own, approved since `since` (Unix epoch seconds, the start of the operator's
+	local day; the server's UTC day when omitted) or with their reversal window still
+	open. Each carries when its undo window closes. Commits nothing.
+	"""
+	approvedPlans(since: String): [ApprovedPlan!]!
+	"""
+	A read-model tab projection (Timeline / Graph / Flow / Suppliers): the plant-wide
+	picture, in which `subject` only selects which path, risk and cause markers are lit.
+	Non-authoritative: reading it mutates nothing. An ill-formed subject yields no rows;
+	a well-formed subject the world does not know yields the plant-wide rows with nothing
+	lit. Neither is an error.
+	"""
+	readModel(subject: ID!, tab: TabKind!): ReadModelView!
+	"""
+	The changes an agent auto-applied under policy, each with the criteria it
+	satisfied and the window within which it may still be reversed. An
+	auto-applied change is a promoted plan whose promoter is the policy (reviewer
+	`policy:<id>`), still in the `promoted` state (a reversed one is done). The changes
+	carry their recorded inverse, so the governed undo can reverse them.
+	"""
+	autoApplied: [AppliedChange!]!
+	"""
+	The inbox's headline metrics as an opaque, capability-filled KPI list: late orders
+	now and if approved (`late_orders_now` / `late_orders`), and `revenue_at_risk` with its
+	`currency`. Each is taken over the points awaiting oversight and judged by the
+	capability. A metric is true or absent: a count or sum that cannot be read is omitted,
+	never served as zero. The keys are opaque, the contract does not enumerate them, so
+	the base stays capability-neutral. A non-authoritative read: computing it commits
+	nothing.
+	"""
+	headlineMetrics: [Metric!]!
+	"""
+	The display labels of the entity ids a client shows: for each id the world can name,
+	the label the capability composes from the materialized names, in request order and
+	each id once. An unnamed, foreign or non-canonical id gets no label, never a guessed
+	one. At most 200 ids per request. A display projection: served texts keep their ids,
+	and reading labels commits nothing.
+	"""
+	labels(ids: [ID!]!): [EntityLabel!]!
+	"""
+	The active auto-apply policy as the operator sees it: the criteria a change must
+	meet, the reversal window, and the pre-authorized verbs.
+	"""
+	policy: Policy!
+}
+
+"""
+A read-model tab projection for a subject: the tab kind and its rows, each row a neutral
+projection of the world model. Non-authoritative: reading mutates nothing.
+"""
+type ReadModelView {
+	"""
+	The subject the tab was projected for.
+	"""
+	subject: ID!
+	"""
+	Which tab this is.
+	"""
+	tab: TabKind!
+	"""
+	The projected rows.
+	"""
+	rows: [ProjectionRow!]!
+}
+
+"""
+One kind's count in an option's scope: a neutral kind label from the capability's fixed
+vocabulary (data, not a schema name) and how many distinct objects of it the option's
+changes touch.
+"""
+type ScopeCount {
+	"""
+	The kind of object counted (opaque to the contract).
+	"""
+	kind: String!
+	"""
+	How many distinct objects of that kind the changes touch (never 0).
+	"""
+	count: Int!
+}
+
+"""
+A capability-filled [`Score`]: the opaque metrics bag plus the capability-defined
+ranking value (`rank_key`; lexically smaller sorts first, so best-first). Reused for a
+plan's do-nothing baseline and for each option.
+"""
+type Score {
+	"""
+	The opaque metrics bag.
+	"""
+	metrics: [Metric!]!
+	"""
+	The capability-defined ordering value (best-first). Ranking is authoritative;
+	the derived display metrics never change it.
+	"""
+	rankKey: String!
+}
+
+"""
+Which read-model tab a [`ReadModelView`] projects. Neutral: the tab kind selects the
+projection query; the returned shape is the same neutral rows for every tab. Every tab is
+plant-wide; the subject only decides what is lit.
+"""
+enum TabKind {
+	"""
+	Every order against its promise date, plus the inbound purchase orders; the subject's
+	order is marked.
+	"""
+	TIMELINE
+	"""
+	The plant-wide dependency graph from orders to their inbound sources, with the
+	subject's path lit and its cause nodes marked.
+	"""
+	GRAPH
+	"""
+	The plant's flow stages, from sources to promised orders, with the subject's chain
+	lit across them.
+	"""
+	FLOW
+	"""
+	The whole supplier base with lead-time, delivery and exposure signals; the subject's
+	supplier is marked.
+	"""
+	SUPPLIERS
+}
+
+"""
+A structured reasoning trace: the ordered steps plus the derived summary. The
+comprehension surface for meaningful human oversight (EU AI Act Art. 14/12).
+"""
+type Trace {
+	"""
+	The reasoning steps, in the order the loop performed them.
+	"""
+	steps: [TraceStep!]!
+	"""
+	Counts derived from the steps (cannot disagree with them).
+	"""
+	summary: TraceSummary!
+}
+
+"""
+One reasoning-trace step: a tag, a human line, and whether the candidate it describes
+was tried and set aside, which keeps rejected candidates visible to oversight.
+"""
+type TraceStep {
+	"""
+	Which kind of reasoning this step records.
+	"""
+	tag: TraceTag!
+	"""
+	The human-readable line surfaced for oversight.
+	"""
+	text: String!
+	"""
+	Whether this step describes a candidate that was tried and set aside.
+	"""
+	rejected: Boolean!
+}
+
+"""
+Summary counts over a trace, so oversight sees the reasoning shape at a glance.
+"""
+type TraceSummary {
+	"""
+	How many candidate plans were simulated (incl. the do-nothing baseline).
+	"""
+	simulated: Int!
+	"""
+	How many steps describe a candidate that was tried and set aside.
+	"""
+	rejected: Int!
+	"""
+	How many open-assumption steps the trace carries.
+	"""
+	openAssumptions: Int!
+}
+
+"""
+The kind of a reasoning-trace step, mirroring [`TraceTag`] (Art. 14 comprehension).
+"""
+enum TraceTag {
+	"""
+	A candidate plan was projected onto a what-if and scored.
+	"""
+	SIMULATED
+	"""
+	A traversal of the governed evidence subgraph the reasoning rested on.
+	"""
+	GRAPH
+	"""
+	An open assumption forced by a grounding omission.
+	"""
+	ASSUMPTION
+	"""
+	A model generation attempt that yielded no candidate (its failure class and
+	reason), or the time budget ending generation. Set aside, never simulated.
+	"""
+	GENERATION
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: Query
+}

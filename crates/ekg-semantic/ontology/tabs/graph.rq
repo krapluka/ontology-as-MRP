@@ -1,0 +1,100 @@
+# Graph tab: the plant-wide supply graph.
+#
+# Subject-free: the six columns Customer, Sales order, Product and BOM, Component, Supplier,
+# Purchase order as typed nodes (?kind "node") and the directed edges between them (?kind
+# "edge", as stored: ?s ?p ?o). The selected point decides only what is lit (markers added in
+# Rust), never what is shown.
+#
+# - Every role is bound as a literal by the per-class IF chain below, so the row vocabulary
+#   test sees each one. `Component` is positional: a Product that is some BOM line's component
+#   and is not itself produced by a BOM. A sub-assembly (produced and used) gets `Product`, so
+#   it sits in the Product and BOM column. A node of any other class never appears.
+# - A purchase order is drawn only while it is open inbound (the shared definition): a fully
+#   received or cancelled PO is history, not supply. Its `po_line_product` edges likewise come
+#   only from its open lines; a fully received line of a still-open PO is not inbound.
+# - Only canonical entity IRIs ({ID_NAMESPACE}<model>/<digits>) are admitted as nodes; a
+#   provenance node (.../sale.order/288#source) or a metamodel term never is. Edges are emitted
+#   between admitted classes here and filtered to two admitted nodes in Rust.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT DISTINCT ?kind ?node ?role ?label ?s ?p ?o
+WHERE {
+    {
+        BIND("node" AS ?kind)
+        {
+            VALUES ?type { ekg:Customer ekg:SalesOrder ekg:Product ekg:BOM ekg:Supplier }
+            ?node a ?type .
+        }
+        UNION
+        {
+            { SELECT DISTINCT ?node WHERE { {{OPEN_INBOUND}} BIND(?ib_po AS ?node) } }
+            BIND(ekg:PurchaseOrder AS ?type)
+        }
+        FILTER(REGEX(STR(?node), "{{CANONICAL_IRI}}"))
+        BIND(EXISTS { ?anyBomLine ekg:component_product ?node } AS ?usedAsComponent)
+        BIND(EXISTS { ?anyBom ekg:produces_product ?node } AS ?producedByBom)
+        BIND(
+            IF(?type = ekg:Customer, "Customer",
+            IF(?type = ekg:SalesOrder, "SalesOrder",
+            IF(?type = ekg:Product && ?usedAsComponent && !?producedByBom, "Component",
+            IF(?type = ekg:Product, "Product",
+            IF(?type = ekg:BOM, "BOM",
+            IF(?type = ekg:Supplier, "Supplier",
+            IF(?type = ekg:PurchaseOrder, "PurchaseOrder", ""))))))) AS ?role)
+        FILTER(?role != "")
+        OPTIONAL { ?node ekg:name ?label }
+    }
+    UNION
+    {
+        BIND("edge" AS ?kind)
+        BIND(ekg:for_customer AS ?p)
+        ?s a ekg:SalesOrder ;
+           ekg:for_customer ?o .
+    }
+    UNION
+    {
+        BIND("edge" AS ?kind)
+        BIND(ekg:line_product AS ?p)
+        ?s a ekg:SalesOrder ;
+           ekg:has_line_of ?orderLine .
+        ?orderLine ekg:line_product ?o .
+    }
+    UNION
+    {
+        BIND("edge" AS ?kind)
+        BIND(ekg:produces_product AS ?p)
+        ?s a ekg:BOM ;
+           ekg:produces_product ?o .
+    }
+    UNION
+    {
+        BIND("edge" AS ?kind)
+        BIND(ekg:component_product AS ?p)
+        ?s a ekg:BOM ;
+           ekg:has_line ?bomLine .
+        ?bomLine ekg:component_product ?o .
+    }
+    UNION
+    {
+        BIND("edge" AS ?kind)
+        BIND(ekg:supplies_product AS ?p)
+        ?link a ekg:SupplierLink ;
+              ekg:supplied_by      ?s ;
+              ekg:supplies_product ?o .
+    }
+    UNION
+    {
+        BIND("edge" AS ?kind)
+        BIND(ekg:from_supplier AS ?p)
+        ?s a ekg:PurchaseOrder ;
+           ekg:from_supplier ?o .
+    }
+    UNION
+    {
+        { SELECT DISTINCT ?s ?o WHERE { {{OPEN_INBOUND}} BIND(?ib_po AS ?s) BIND(?ib_product AS ?o) } }
+        BIND("edge" AS ?kind)
+        BIND(ekg:po_line_product AS ?p)
+    }
+}
+ORDER BY ?kind ?role ?node ?s ?p ?o

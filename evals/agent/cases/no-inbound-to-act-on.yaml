@@ -1,0 +1,23 @@
+id: no-inbound-to-act-on
+category: should_abstain
+profile: supply-risk
+subject: { model: sale.order, id: 1 }
+records:
+  - { model: sale.order, id: 1, fields: { name: S00001, commitment_date: "2027-03-16T00:00:00", order_line: "[10]" } }
+  - { model: sale.order.line, id: 10, fields: { product_id: "[100]", product_uom_qty: "10" } }
+  - { model: product.product, id: 100, fields: { name: Cargo Bike } }
+  - { model: product.product, id: 101, fields: { name: Battery Pack } }
+  - { model: mrp.bom, id: 20, fields: { product_id: "[100]", bom_line_ids: "[21]" } }
+  - { model: mrp.bom.line, id: 21, fields: { product_id: "[101]", product_qty: "1" } }
+  - { model: stock.quant, id: 30, fields: { product_id: "[101]", quantity: "0" } }
+expect:
+  outcome: abstain
+futile:
+  - actions:
+      - { action_type: re_promise_date, target: { model: sale.order, id: 1 }, params: { new_date: "2027-05-01 00:00:00" } }
+  - actions:
+      - { action_type: notify_owner, target: { model: sale.order, id: 1 }, params: { message: Battery Packs are short and nothing is on order. } }
+notes: >
+  The order needs 10 Battery Packs, none is on hand and nothing is on order. There is no
+  inbound line to move, and a later promise does not help because no stock ever arrives. No
+  action in the supply-risk catalog improves the outcome, so the right result is no plan.

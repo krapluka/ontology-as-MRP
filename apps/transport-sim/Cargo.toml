@@ -1,0 +1,27 @@
+[package]
+name = "ekg-transport-sim"
+description = "On-demand transport/ETA simulator: slip the seeded inbound shipment's ETA past the customer promise and fire the ingest webhook so the Cargo Trike order flips to at risk. Not run by default: invoke via `just transport-sim` / `cargo run -p ekg-transport-sim`."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "ekg-transport-sim"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+# Shared Odoo json2 client (connect, xmlid, search, write), the same one the seeder uses.
+odoo-client = { workspace = true }
+# Blocking HTTP for the ingest webhook. rustls-tls-native-roots so a remote https
+# EKG_BACKEND_URL also works (the local default is plain http://localhost:8090).
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls-native-roots",
+] }
+
+[lints]
+workspace = true

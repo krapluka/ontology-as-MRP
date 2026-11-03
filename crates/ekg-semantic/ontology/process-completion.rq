@@ -1,0 +1,17 @@
+# Delivery judgment input: a manufacturing order's projected completion (the latest planned end
+# over its work orders) and the sales orders it fulfills, whose promise the completion is
+# measured against. `<urn:ekg:subject>` is replaced only with an IRI
+# `ontology::canonical_subject` rebuilt.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?maxEnd ?so
+WHERE {
+    {
+        SELECT (MAX(?end) AS ?maxEnd) WHERE {
+            ?wo ekg:part_of <urn:ekg:subject> ;
+                ekg:endedAt ?end .
+        }
+    }
+    OPTIONAL { <urn:ekg:subject> ekg:fulfills ?so }
+}

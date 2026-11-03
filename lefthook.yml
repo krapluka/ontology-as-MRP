@@ -1,0 +1,41 @@
+# Git hooks, installed by `just setup-hooks` (lefthook is a single Go binary).
+min_version: 1.5.4
+colors: false
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: "*.rs"
+      run: cargo fmt --all -- --check
+    clippy:
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets -- -D warnings
+
+commit-msg:
+  commands:
+    conventional:
+      # Rust-native conventional-commit check (cocogitto), replacing commitlint.
+      run: cog verify "$(cat {1})"
+
+pre-push:
+  commands:
+    branch-name:
+      run: |
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        pattern="^(feature|fix|hotfix|refactor|chore|docs|test|experiment)\/[a-z0-9][a-z0-9\-]*$"
+        if [ "$branch" = "main" ] || [ "$branch" = "develop" ]; then
+          exit 0
+        fi
+        if ! echo "$branch" | grep -qE "$pattern"; then
+          echo ""
+          echo "ERROR: Branch name '$branch' does not follow the convention."
+          echo ""
+          echo "Expected: <type>/<scope>-<description>"
+          echo "Types:    feature, fix, hotfix, refactor, chore, docs, test, experiment"
+          echo "Example:  feature/supply-risk-monitor"
+          echo ""
+          exit 1
+        fi
+    deny:
+      run: cargo deny check

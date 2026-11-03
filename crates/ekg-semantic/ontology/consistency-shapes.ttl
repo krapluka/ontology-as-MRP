@@ -1,0 +1,201 @@
+#
+# SHACL consistency shapes, validated over the settled whole graph.
+#
+# These are the cross-entity constraints: object-property targets (sh:class to
+# another entity) and relation cardinalities that span entities. They can only hold
+# once all connected entities are materialized, so they are never enforced on the
+# write path: that would reject valid incremental writes.
+#
+# Instead they are validated over the whole graph via GraphDB's bulk `validate`
+# endpoint, which produces a non-blocking conformance report. They are not loaded
+# into the reserved SHACLShapeGraph.
+#
+# Provenance and own-value constraints are not repeated here. Those are enforced on
+# write by write-shapes.ttl.
+
+@prefix ekg:  <https://ekg.example/ontology#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+
+# --- Sales & promise ---
+
+ekg:SalesOrderConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:SalesOrder ;
+    sh:property [
+        sh:path ekg:has_line_of ;
+        sh:minCount 1 ;
+        sh:class ekg:OrderLine ;
+        sh:message "A sales order must have at least one order line." ;
+    ] ;
+    sh:property [
+        sh:path ekg:for_customer ;
+        sh:maxCount 1 ;
+        sh:class ekg:Customer ;
+    ] .
+
+ekg:OrderLineConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:OrderLine ;
+    sh:property [
+        sh:path ekg:line_product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+        sh:message "An order line references exactly one product." ;
+    ] .
+
+# --- BOM ---
+
+ekg:BomConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:BOM ;
+    sh:property [
+        sh:path ekg:produces_product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+        sh:message "A BOM produces exactly one product." ;
+    ] ;
+    sh:property [
+        sh:path ekg:has_line ;
+        sh:minCount 1 ;
+        sh:class ekg:BomLine ;
+        sh:message "A BOM has at least one line." ;
+    ] .
+
+ekg:BomLineConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:BomLine ;
+    sh:property [
+        sh:path ekg:component_product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+        sh:message "A BOM line consumes exactly one component product." ;
+    ] .
+
+# --- Supplier sourcing ---
+
+ekg:SupplierLinkConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:SupplierLink ;
+    sh:property [
+        sh:path ekg:supplies_product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+    ] ;
+    sh:property [
+        sh:path ekg:supplied_by ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Supplier ;
+    ] .
+
+# --- Inbound supply ---
+
+ekg:PurchaseOrderLineConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:PurchaseOrderLine ;
+    sh:property [
+        sh:path ekg:po_line_product ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+    ] .
+
+# --- Stock on hand & safety stock ---
+
+ekg:StockLevelConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:StockLevel ;
+    sh:property [
+        sh:path ekg:stock_of ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+    ] .
+
+ekg:ReorderRuleConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:ReorderRule ;
+    sh:property [
+        sh:path ekg:reorder_for ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+    ] .
+
+# --- Manufacturing process (cross-entity relation targets) ---
+# A work center is an ekg:Agent and a product an ekg:Artifact by subclass entailment
+# (rdfsplus), so the neutral-verb targets below hold once all connected entities are
+# materialized.
+
+ekg:ManufacturingOrderConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:ManufacturingOrder ;
+    sh:property [
+        sh:path ekg:produced ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Product ;
+        sh:message "A manufacturing order produces exactly one product (artifact)." ;
+    ] ;
+    sh:property [
+        sh:path ekg:builds_from ;
+        sh:maxCount 1 ;
+        sh:class ekg:BOM ;
+    ] ;
+    sh:property [
+        sh:path ekg:has_work_order ;
+        sh:class ekg:WorkOrder ;
+    ] ;
+    sh:property [
+        sh:path ekg:used ;
+        sh:class ekg:Artifact ;
+    ] .
+
+ekg:WorkOrderConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:WorkOrder ;
+    sh:property [
+        sh:path ekg:performedBy ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:Agent ;
+        sh:message "A work order is performed by exactly one agent (work center)." ;
+    ] ;
+    sh:property [
+        sh:path ekg:part_of ;
+        sh:maxCount 1 ;
+        sh:class ekg:ManufacturingOrder ;
+    ] ;
+    sh:property [
+        sh:path ekg:realizes ;
+        sh:maxCount 1 ;
+        sh:class ekg:Operation ;
+    ] .
+
+ekg:OperationConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:Operation ;
+    sh:property [
+        sh:path ekg:operation_of ;
+        sh:maxCount 1 ;
+        sh:class ekg:BOM ;
+    ] ;
+    sh:property [
+        sh:path ekg:performedBy ;
+        sh:maxCount 1 ;
+        sh:class ekg:Agent ;
+    ] .
+
+ekg:WorkCenterCapacityConsistencyShape
+    a sh:NodeShape ;
+    sh:targetClass ekg:WorkCenterCapacity ;
+    sh:property [
+        sh:path ekg:capacity_of ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class ekg:WorkCenter ;
+    ] .

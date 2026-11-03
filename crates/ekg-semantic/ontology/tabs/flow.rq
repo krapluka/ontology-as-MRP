@@ -1,0 +1,94 @@
+# Flow tab: the plant-wide pipeline.
+#
+# Subject-free: every entity placed in one of the five stages with the facts its tile shows.
+# The stage is bound as a literal by the explicit per-class IF chain (the row vocabulary test
+# reads it); the selected point decides only what is lit (markers added in Rust).
+#
+#   suppliers:      every supplier, with its lead time (the longest sourcing `delay`);
+#                   the sourcing role (single/primary/backup) is ranked in Rust.
+#   on_order:       every open inbound purchase order (the shared definition) per product,
+#                   with its open quantity, arrival and vendor. Never a fully received PO.
+#   in_stock:       every component product (a BOM line's component that no BOM produces)
+#                   with its on-hand (sum of stock levels) and safety stock (max reorder
+#                   minimum).
+#   in_production:  every open (not done / cancelled) manufacturing order and work order,
+#                   with its lifecycle state (and the MO's product/quantity, the WO's MO).
+#   promised:       every promised sales order with its due date and value.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?stage ?entity ?label ?lead_time ?supplier ?product ?quantity ?arrival ?on_hand ?safety
+       ?lifecycle_state ?part_of ?commitment_date ?order_value
+WHERE {
+    {
+        BIND(ekg:Supplier AS ?class)
+        ?entity a ekg:Supplier .
+        OPTIONAL {
+            SELECT ?entity (MAX(?delay) AS ?lead_time) WHERE {
+                ?leadLink ekg:supplied_by ?entity ;
+                          ekg:delay       ?delay .
+            } GROUP BY ?entity
+        }
+    }
+    UNION
+    {
+        BIND(ekg:PurchaseOrder AS ?class)
+        {
+            SELECT ?entity ?product (SUM(?ib_open) AS ?quantity) (MIN(?ib_arrival) AS ?arrival)
+            WHERE {
+                {{OPEN_INBOUND}}
+                BIND(?ib_po AS ?entity)
+                BIND(?ib_product AS ?product)
+            } GROUP BY ?entity ?product
+        }
+        OPTIONAL { ?entity ekg:from_supplier ?supplier }
+    }
+    UNION
+    {
+        BIND(ekg:Product AS ?class)
+        ?entity a ekg:Product .
+        FILTER EXISTS { ?compLine ekg:component_product ?entity }
+        FILTER NOT EXISTS { ?compBom ekg:produces_product ?entity }
+        OPTIONAL {
+            SELECT ?entity (SUM(?qty) AS ?on_hand) WHERE {
+                ?stock a ekg:StockLevel ;
+                       ekg:stock_of ?entity ;
+                       ekg:quantity ?qty .
+            } GROUP BY ?entity
+        }
+        OPTIONAL {
+            SELECT ?entity (MAX(?min) AS ?safety) WHERE {
+                ?rule a ekg:ReorderRule ;
+                      ekg:reorder_for     ?entity ;
+                      ekg:product_min_qty ?min .
+            } GROUP BY ?entity
+        }
+    }
+    UNION
+    {
+        VALUES ?class { ekg:ManufacturingOrder ekg:WorkOrder }
+        ?entity a ?class .
+        OPTIONAL { ?entity ekg:lifecycle_state ?lifecycle_state }
+        FILTER(!BOUND(?lifecycle_state) || (?lifecycle_state != "done" && ?lifecycle_state != "cancel"))
+        OPTIONAL { ?entity ekg:produced ?product }
+        OPTIONAL { ?entity ekg:product_qty ?quantity }
+        OPTIONAL { ?entity ekg:part_of ?part_of }
+    }
+    UNION
+    {
+        BIND(ekg:SalesOrder AS ?class)
+        ?entity a ekg:SalesOrder ;
+                ekg:commitment_date ?commitment_date .
+        OPTIONAL { ?entity ekg:order_value ?order_value }
+    }
+    FILTER(REGEX(STR(?entity), "{{CANONICAL_IRI}}"))
+    OPTIONAL { ?entity ekg:name ?label }
+    BIND(
+        IF(?class = ekg:Supplier, "suppliers",
+        IF(?class = ekg:PurchaseOrder, "on_order",
+        IF(?class = ekg:Product, "in_stock",
+        IF(?class = ekg:ManufacturingOrder || ?class = ekg:WorkOrder, "in_production",
+        IF(?class = ekg:SalesOrder, "promised", ""))))) AS ?stage)
+    FILTER(?stage != "")
+}
+ORDER BY ?stage ?entity ?product

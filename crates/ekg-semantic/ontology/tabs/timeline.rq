@@ -1,0 +1,53 @@
+# Timeline tab: the plant-wide structure.
+#
+# Subject-free: every promised order and every open inbound arrival. The selected point decides
+# only what is lit (the `on_path`/`at_risk`/`cause` markers the Rust row builder adds), never
+# what is shown. One row per fact, tagged by ?kind:
+#
+#   promise:  a promised sales order: its commitment date, label and value;
+#   ready:    the same order's ready/completion date: the latest planned end over the
+#             manufacturing orders that fulfil it and their work orders;
+#   inbound:  an open inbound purchase order's arrival per product (the shared open-inbound
+#             definition), with its open quantity and vendor. A fully received PO never shows.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?kind ?entity ?date ?label ?order_value ?product ?quantity ?supplier
+WHERE {
+    {
+        BIND("promise" AS ?kind)
+        ?entity a ekg:SalesOrder ;
+                ekg:commitment_date ?date .
+        OPTIONAL { ?entity ekg:order_value ?order_value }
+    }
+    UNION
+    {
+        BIND("ready" AS ?kind)
+        {
+            SELECT ?entity (MAX(?end) AS ?date) WHERE {
+                ?entity a ekg:SalesOrder ;
+                        ekg:commitment_date ?promised .
+                ?mo ekg:fulfills ?entity .
+                { ?mo ekg:endedAt ?end }
+                UNION
+                { ?wo ekg:part_of ?mo ; ekg:endedAt ?end }
+            } GROUP BY ?entity
+        }
+    }
+    UNION
+    {
+        BIND("inbound" AS ?kind)
+        {
+            SELECT ?entity ?product (SUM(?ib_open) AS ?quantity) (MIN(?ib_arrival) AS ?date)
+            WHERE {
+                {{OPEN_INBOUND}}
+                BIND(?ib_po AS ?entity)
+                BIND(?ib_product AS ?product)
+            } GROUP BY ?entity ?product
+        }
+        OPTIONAL { ?entity ekg:from_supplier ?supplier }
+    }
+    FILTER(REGEX(STR(?entity), "{{CANONICAL_IRI}}"))
+    OPTIONAL { ?entity ekg:name ?label }
+}
+ORDER BY ?date ?kind ?entity ?product

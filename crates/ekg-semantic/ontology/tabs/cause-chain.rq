@@ -1,0 +1,31 @@
+# Proposer input: the selected supply-risk point's cause chain, the same chain the tabs light.
+# Run only for a non-empty cause set (an empty VALUES block would return nothing). The
+# `{{CAUSES}}` list is replaced only with IRIs `ontology::canonical_subject` rebuilt (the cause
+# components come from the rule's own rows).
+#
+# Per short component, every open inbound line (the shared open-inbound definition, the inbound
+# the rule counts): the line, its purchase order, the PO's vendor, its current arrival, and the
+# open shipments delivering the PO (the rule's open test; their ETA is the arrival the rule
+# prefers, and what an expedite moves with the line).
+#
+# It only names entities: the proposer grounds each one through the world model's read-policy-
+# filtered `ground`, so nothing here bypasses the read policy or provenance.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?cause ?line ?po ?vendor ?ship ?arrival
+WHERE {
+    {{OPEN_INBOUND}}
+    BIND(?ib_product AS ?cause)
+    BIND(?ib_pol AS ?line)
+    BIND(?ib_po AS ?po)
+    BIND(?ib_arrival AS ?arrival)
+    OPTIONAL { ?ib_po ekg:from_supplier ?vendor }
+    OPTIONAL {
+        ?ship a ekg:Shipment ; ekg:delivers ?ib_po .
+        FILTER NOT EXISTS { ?ship ekg:completed_at ?shipDone }
+        FILTER NOT EXISTS { ?ship ekg:transport_status "cancel" }
+    }
+    VALUES ?cause { {{CAUSES}} }
+}
+ORDER BY ?cause ?arrival ?line ?ship

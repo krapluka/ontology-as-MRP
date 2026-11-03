@@ -1,0 +1,21 @@
+[package]
+name = "ekg-odoo-seed"
+description = "Idempotent seeder that loads the at-risk supply-risk dataset (multi-level BOM) into Odoo via JSON-RPC."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "ekg-odoo-seed"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+# Shared Odoo JSON-RPC client (connect, execute_kw, ensure).
+odoo-client = { workspace = true }
+
+[lints]
+workspace = true

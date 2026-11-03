@@ -1,0 +1,44 @@
+# SELECT projection of the process schedule-infeasibility rule for the Restate
+# monitor. Per manufacturing order it projects the summed ekg:duration_expected of
+# the operations of the BOM it builds from (ekg:builds_from, ekg:operation_of), the
+# order's planned window (ekg:startedAt / ekg:endedAt), and the commitment date of
+# the sales-order promise it fulfils (ekg:fulfills, ekg:commitment_date) when
+# present. One row per order.
+#
+# The window arithmetic is done in Rust: the available window minutes are endedAt
+# minus startedAt (preferred), else commitment minus startedAt, and a verdict is
+# raised only when the required summed duration exceeds that window. The summed
+# duration is the makespan of a linear routing only; parallel operations are not
+# modelled. ?startedAt is required: an order with no start cannot be assessed and
+# yields no row.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT ?mo ?startedAt ?endedAt ?so ?commitment (SUM(?duration) AS ?required)
+WHERE {
+    ?mo a ekg:ManufacturingOrder ;
+        ekg:startedAt ?startedAt .
+
+    # the operations of the BOM it builds from carry the expected per-step durations
+    # to sum. OPTIONAL: Odoo routing is optional, and the finish-versus-commitment
+    # check does not need the duration, so an order with no routing still yields a
+    # row (with a required duration of 0).
+    OPTIONAL {
+        ?mo  ekg:builds_from    ?bom .
+        ?op  a ekg:Operation ;
+             ekg:operation_of      ?bom ;
+             ekg:duration_expected ?duration .
+    }
+
+    # planned finish (preferred window bound), optional; the interpreter falls
+    # back to the commitment when it is absent.
+    OPTIONAL { ?mo ekg:endedAt ?endedAt }
+
+    # the promise this order fulfils, for the fallback window bound.
+    OPTIONAL {
+        ?mo ekg:fulfills        ?so .
+        ?so ekg:commitment_date ?commitment .
+    }
+}
+GROUP BY ?mo ?startedAt ?endedAt ?so ?commitment

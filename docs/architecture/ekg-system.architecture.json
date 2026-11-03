@@ -1,0 +1,382 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ontology-as-MRP — C4 Container view",
+    "quality_profile": "standard",
+    "output": "docs/architecture/ekg-system.architecture.html",
+    "repository": {
+      "url": "https://github.com/krapluka/ontology-as-MRP",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "5ed7676b3e622eb2cf2d98a9828176cbaf726e9b"
+    }
+  },
+  "components": [
+    {
+      "id": "reviewer",
+      "type": "external",
+      "label": "Operator",
+      "sublabel": "human oversight — EU AI Act Art. 14 & 12",
+      "pos": [
+        40,
+        80
+      ],
+      "size": [
+        200,
+        74
+      ]
+    },
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "Plant Pulse",
+      "sublabel": "React UI · nginx serves build + proxies /api",
+      "pos": [
+        460,
+        80
+      ],
+      "size": [
+        200,
+        74
+      ],
+      "sources": [
+        {
+          "path": "apps/frontend/Dockerfile",
+          "label": "container image"
+        },
+        {
+          "path": "apps/frontend/nginx.default.conf.template",
+          "label": "/api reverse proxy"
+        },
+        {
+          "path": "apps/frontend/src/screens/RiskInbox.tsx",
+          "label": "Risk inbox + impact tabs"
+        }
+      ]
+    },
+    {
+      "id": "restate",
+      "type": "backend",
+      "label": "Restate",
+      "sublabel": "durable objects · audit trail · agent state",
+      "pos": [
+        800,
+        80
+      ],
+      "size": [
+        200,
+        74
+      ],
+      "sources": [
+        {
+          "path": "apps/backend/src/skills.rs",
+          "label": "agent skill registry"
+        },
+        {
+          "path": "apps/backend/src/rollout.rs",
+          "label": "agent rollout mode"
+        },
+        {
+          "path": "apps/backend/src/shadow.rs",
+          "label": "shadow records"
+        }
+      ]
+    },
+    {
+      "id": "nats",
+      "type": "messagebus",
+      "label": "NATS JetStream",
+      "sublabel": "event backbone — durable RdfChanged fan-out",
+      "pos": [
+        1200,
+        80
+      ],
+      "size": [
+        200,
+        74
+      ]
+    },
+    {
+      "id": "vector",
+      "type": "database",
+      "label": "Qdrant",
+      "sublabel": "opt-in read projection — non-authoritative",
+      "pos": [
+        1200,
+        500
+      ],
+      "size": [
+        200,
+        74
+      ]
+    },
+    {
+      "id": "odoo",
+      "type": "external",
+      "label": "Odoo",
+      "sublabel": "ERP — MRP · Sales · Purchase",
+      "pos": [
+        40,
+        290
+      ],
+      "size": [
+        200,
+        74
+      ]
+    },
+    {
+      "id": "backend",
+      "type": "backend",
+      "label": "ekg-backend",
+      "sublabel": "Rust · axum · Restate SDK · containerized",
+      "pos": [
+        800,
+        282
+      ],
+      "size": [
+        200,
+        90
+      ],
+      "tag": "system core",
+      "sources": [
+        {
+          "path": "apps/backend/src/action_point.rs",
+          "label": "commands [REST /api]"
+        },
+        {
+          "path": "apps/backend/src/drift.rs",
+          "label": "detect → propose loop"
+        },
+        {
+          "path": "crates/ekg-cognition/src/tools/gateway.rs",
+          "label": "agent tool gateway [MCP, task token]"
+        }
+      ]
+    },
+    {
+      "id": "graphdb",
+      "type": "database",
+      "label": "GraphDB",
+      "sublabel": "RDF/OWL world model · SHACL",
+      "pos": [
+        1200,
+        290
+      ],
+      "size": [
+        200,
+        74
+      ],
+      "sources": [
+        {
+          "path": "crates/ekg-semantic/src/world_model.rs",
+          "label": "materialize + provenance + SHACL"
+        }
+      ]
+    },
+    {
+      "id": "hayhooks",
+      "type": "backend",
+      "label": "Hayhooks",
+      "sublabel": "Haystack 3 · cognition + agent runtime",
+      "pos": [
+        800,
+        500
+      ],
+      "size": [
+        200,
+        74
+      ],
+      "sources": [
+        {
+          "path": "apps/hayhooks/pipelines/generate/pipeline_wrapper.py",
+          "label": "generate (OpenAI-compatible stream)"
+        },
+        {
+          "path": "crates/ekg-cognition/src/provider.rs",
+          "label": "engine route + resilience"
+        },
+        {
+          "path": "apps/hayhooks/pipelines/agent/pipeline_wrapper.py",
+          "label": "agent run (tools + skills via the gateway)"
+        }
+      ]
+    },
+    {
+      "id": "transport-sim",
+      "type": "external",
+      "label": "transport-sim",
+      "sublabel": "Rust CLI · on-demand ETA slip",
+      "pos": [
+        40,
+        470
+      ],
+      "size": [
+        200,
+        74
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "external",
+      "label": "Model provider",
+      "sublabel": "OpenAI-compatible · OpenRouter / Ollama / vLLM",
+      "pos": [
+        800,
+        700
+      ],
+      "size": [
+        200,
+        74
+      ]
+    },
+    {
+      "id": "langfuse",
+      "type": "external",
+      "label": "Langfuse",
+      "sublabel": "trace backend · opt-in · read model",
+      "pos": [
+        1200,
+        700
+      ],
+      "size": [
+        200,
+        74
+      ],
+      "sources": [
+        {
+          "path": "deploy/podman/local/compose.yaml",
+          "label": "telemetry profile"
+        },
+        {
+          "path": "apps/backend/src/telemetry.rs",
+          "label": "trace export (opt-in)"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "ontology-as-MRP (system)",
+      "wraps": [
+        "frontend",
+        "restate",
+        "nats",
+        "vector",
+        "backend",
+        "graphdb",
+        "hayhooks"
+      ],
+      "pad": 60
+    }
+  ],
+  "connections": [
+    {
+      "id": "operate",
+      "from": "reviewer",
+      "to": "frontend",
+      "label": "approve · dismiss · undo",
+      "variant": "security",
+      "labelDx": -30
+    },
+    {
+      "id": "api",
+      "from": "frontend",
+      "to": "backend",
+      "label": "reads [GraphQL] · commands [REST] — /api",
+      "variant": "security",
+      "labelDy": 17
+    },
+    {
+      "id": "source",
+      "from": "odoo",
+      "to": "backend",
+      "label": "ingest ↔ write-back",
+      "variant": "emphasis"
+    },
+    {
+      "id": "durable",
+      "from": "backend",
+      "to": "restate",
+      "label": "durable objects · oversight ingress [Restate SDK]"
+    },
+    {
+      "id": "materialize",
+      "from": "backend",
+      "to": "graphdb",
+      "label": "materialize [SPARQL]"
+    },
+    {
+      "id": "cognition",
+      "from": "backend",
+      "to": "hayhooks",
+      "label": "generate · embed · agent run · traceparent",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "agent-tools",
+      "from": "hayhooks",
+      "to": "backend",
+      "label": "tools [MCP] · skills · task token · read-only",
+      "variant": "security",
+      "labelDy": -24,
+      "labelDx": -110
+    },
+    {
+      "id": "changed",
+      "from": "backend",
+      "to": "nats",
+      "label": "RdfChanged [JetStream]",
+      "variant": "dashed"
+    },
+    {
+      "id": "project",
+      "from": "backend",
+      "to": "vector",
+      "label": "project [read model] · off by default",
+      "variant": "dashed"
+    },
+    {
+      "id": "sim-slip",
+      "from": "transport-sim",
+      "to": "odoo",
+      "label": "slip shipment ETA",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "sim-webhook",
+      "from": "transport-sim",
+      "to": "backend",
+      "label": "ingest webhook [/api]",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "provider-call",
+      "from": "hayhooks",
+      "to": "provider",
+      "label": "holds the key · no retries",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "traces-engine",
+      "from": "backend",
+      "to": "langfuse",
+      "label": "traces [OTLP/HTTP] · opt-in",
+      "variant": "dashed"
+    },
+    {
+      "id": "traces-runtime",
+      "from": "hayhooks",
+      "to": "langfuse",
+      "label": "traces [OTLP/HTTP] · opt-in",
+      "variant": "dashed"
+    }
+  ]
+}

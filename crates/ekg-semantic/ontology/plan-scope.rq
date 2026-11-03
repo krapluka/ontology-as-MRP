@@ -1,0 +1,20 @@
+# Display input: the facts a plan option's scope is counted from. For each object a change
+# targets, these are its class and the objects it stands for: a work order's manufacturing
+# order (part_of) and work center (performedBy), a capacity record's work center
+# (capacity_of), and a purchase-order line's order (has_po_line).
+# `ekg_semantic::display::plan_scope` applies the counting rule. The `{{TARGETS}}` marker is
+# replaced only with IRIs `ontology::canonical_subject` rebuilt.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?t ?class ?order ?workCenter ?capacityOf ?po
+WHERE {
+    VALUES ?t { {{TARGETS}} }
+    ?t a ?class .
+    FILTER(?class IN (ekg:SalesOrder, ekg:ManufacturingOrder, ekg:WorkOrder, ekg:PurchaseOrder,
+                      ekg:PurchaseOrderLine, ekg:WorkCenter, ekg:WorkCenterCapacity))
+    OPTIONAL { ?t ekg:part_of ?order }
+    OPTIONAL { ?t ekg:performedBy ?workCenter }
+    OPTIONAL { ?t ekg:capacity_of ?capacityOf }
+    OPTIONAL { ?po ekg:has_po_line ?t }
+}

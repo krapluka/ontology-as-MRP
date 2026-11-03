@@ -1,0 +1,56 @@
+[workspace]
+members = [
+    "crates/ekg-domain",
+    "crates/odoo-client",
+    "crates/ekg-semantic",
+    "crates/ekg-kinetic",
+    "crates/ekg-dynamic",
+    "crates/ekg-cognition",
+    "apps/backend",
+    "apps/odoo-seed",
+    "apps/transport-sim",
+    "e2e",
+]
+resolver = "3"
+
+[workspace.dependencies]
+# Internal crates carry an explicit version (not a bare path) so the supply-chain
+# gate's wildcard ban stays on; the layer crates inherit this with `workspace = true`.
+ekg-domain = { path = "crates/ekg-domain", version = "0.1.0" }
+odoo-client = { path = "crates/odoo-client", version = "0.1.0" }
+ekg-semantic = { path = "crates/ekg-semantic", version = "0.1.0" }
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/krapluka/ontology-as-MRP"
+# The minimum Rust the workspace builds with: the highest `rust-version` any resolved dependency
+# declares (restate-sdk 0.12 needs 1.90). The toolchain itself is `rust-toolchain.toml` (stable).
+# The workspace tests fail when a dependency needs more (`workspace_rust_version`); raise it then.
+rust-version = "1.90"
+version = "0.1.0"
+
+# Governance invariants, enforced by the compiler for every workspace crate.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# No silent panics in the engine: proposals fail loud, truth is never corrupted.
+unwrap_used = "deny"
+expect_used = "warn"
+# New in clippy 1.99 (pedantic): wants `assert!(x.is_empty())` rewritten as
+# `assert_eq!(x, [] as [T; 0])`. That reads worse, and its own fix does not compile for
+# element types without `PartialEq` + `Debug`. Tests add a message where the value matters.
+assert_is_empty = "allow"
+
+# Test builds keep line tables only (file:line in panics and backtraces) and no debug info for
+# dependencies: smaller test binaries link faster, and macOS scans each new executable before its
+# first launch at a cost that grows with its size. `cargo build`/`cargo run` keep full
+# debug info; debug one test run with `CARGO_PROFILE_TEST_DEBUG=true cargo test …`.
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+debug = false

@@ -1,0 +1,101 @@
+# Suppliers tab: the per-supplier detail.
+#
+# Subject-free drill-down rows, each tagged by ?kind:
+#
+#   open_po          the supplier's open inbound purchase orders (the shared open-inbound
+#                    definition) per product, with the open quantity and arrival. A fully
+#                    received or cancelled PO is never listed.
+#   stock            per component the supplier sources: on-hand (sum of stock levels), safety
+#                    stock (max reorder minimum) and the 30-day demand. Demand is the sum of
+#                    ordered quantity times BOM line quantity over the orders promised in
+#                    [today, demand-to] and over the BOM lines of the ordered product's own
+#                    tree (any depth) that use the component, each (order line, BOM line)
+#                    once. This is the same first-order roll-up the risk rule's requirement
+#                    sums, so another product's BOM line never counts. Known simplification
+#                    (shared with the rule): every BOM of a product in the tree is joined, so
+#                    Odoo alternative BOMs each add their lines (the contract ingests no BOM
+#                    sequence or type). The sourcing role for the component is ranked in Rust.
+#   dependent_order  every sales order whose product's BOM (any depth) uses a component the
+#                    supplier sources, with its value and promise (marked at_risk in Rust).
+#
+# An unbound optional drops out of its row, so each row carries only the facts it has.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT DISTINCT ?kind ?supplier ?po ?label ?product ?quantity ?arrival ?stock_of ?on_hand
+       ?safety ?demand ?order ?order_value ?commitment_date
+WHERE {
+    {
+        BIND("open_po" AS ?kind)
+        {
+            SELECT ?po ?product (SUM(?ib_open) AS ?quantity) (MIN(?ib_arrival) AS ?arrival)
+            WHERE {
+                {{OPEN_INBOUND}}
+                BIND(?ib_po AS ?po)
+                BIND(?ib_product AS ?product)
+            } GROUP BY ?po ?product
+        }
+        ?po ekg:from_supplier ?supplier .
+        FILTER(REGEX(STR(?po), "{{CANONICAL_IRI}}"))
+        OPTIONAL { ?po ekg:name ?label }
+    }
+    UNION
+    {
+        BIND("stock" AS ?kind)
+        ?sourcingLink a ekg:SupplierLink ;
+                      ekg:supplied_by      ?supplier ;
+                      ekg:supplies_product ?stock_of .
+        FILTER(REGEX(STR(?stock_of), "{{CANONICAL_IRI}}"))
+        OPTIONAL { ?stock_of ekg:name ?label }
+        OPTIONAL {
+            SELECT ?stock_of (SUM(?qty) AS ?on_hand) WHERE {
+                ?stock a ekg:StockLevel ;
+                       ekg:stock_of ?stock_of ;
+                       ekg:quantity ?qty .
+            } GROUP BY ?stock_of
+        }
+        OPTIONAL {
+            SELECT ?stock_of (MAX(?min) AS ?safety) WHERE {
+                ?rule a ekg:ReorderRule ;
+                      ekg:reorder_for     ?stock_of ;
+                      ekg:product_min_qty ?min .
+            } GROUP BY ?stock_of
+        }
+        OPTIONAL {
+            SELECT ?stock_of (SUM(?required) AS ?demand) WHERE {
+                SELECT DISTINCT ?demandLine ?componentLine ?stock_of ?required WHERE {
+                    ?demandOrder a ekg:SalesOrder ;
+                                 ekg:commitment_date ?demandDate ;
+                                 ekg:has_line_of     ?demandLine .
+                    BIND(SUBSTR(STR(?demandDate), 1, 10) AS ?demandDay)
+                    FILTER(?demandDay >= "{{TODAY}}" && ?demandDay <= "{{DEMAND_TO}}")
+                    ?demandLine ekg:line_product    ?finished ;
+                                ekg:product_uom_qty ?orderQty .
+                    ?finished (^ekg:produces_product/ekg:has_line/ekg:component_product)* ?parent .
+                    ?parentBom ekg:produces_product ?parent ;
+                               ekg:has_line         ?componentLine .
+                    ?componentLine ekg:component_product ?stock_of ;
+                                   ekg:product_qty       ?componentQty .
+                    BIND((?orderQty * ?componentQty) AS ?required)
+                }
+            } GROUP BY ?stock_of
+        }
+    }
+    UNION
+    {
+        BIND("dependent_order" AS ?kind)
+        ?order a ekg:SalesOrder ;
+               ekg:has_line_of ?dependentLine .
+        ?dependentLine ekg:line_product ?dependentProduct .
+        ?dependentProduct (^ekg:produces_product/ekg:has_line/ekg:component_product)+ ?usedComponent .
+        ?dependentLink a ekg:SupplierLink ;
+                       ekg:supplies_product ?usedComponent ;
+                       ekg:supplied_by      ?supplier .
+        FILTER(REGEX(STR(?order), "{{CANONICAL_IRI}}"))
+        OPTIONAL { ?order ekg:name ?label }
+        OPTIONAL { ?order ekg:order_value ?order_value }
+        OPTIONAL { ?order ekg:commitment_date ?commitment_date }
+    }
+    FILTER(REGEX(STR(?supplier), "{{CANONICAL_IRI}}"))
+}
+ORDER BY ?kind ?supplier ?po ?product ?stock_of ?order

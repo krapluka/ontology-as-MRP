@@ -1,0 +1,19 @@
+# Proposer input: the entities a manufacturing-order point's process remediation may act on
+# beyond its own work orders: the work centers its work orders run on, and those centers'
+# capacity records. The process agent grounds each under the scheduler's read context, so a
+# capacity record is evidence the model sees and a legal target for a capacity raise. The
+# subject placeholder is replaced only with an IRI `ontology::canonical_subject` rebuilt.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT DISTINCT ?wc ?rec
+WHERE {
+    ?wo a ekg:WorkOrder ;
+        ekg:part_of     <urn:ekg:subject> ;
+        ekg:performedBy ?wc .
+    OPTIONAL {
+        ?rec a ekg:WorkCenterCapacity ;
+             ekg:capacity_of ?wc .
+    }
+}
+ORDER BY ?wc ?rec

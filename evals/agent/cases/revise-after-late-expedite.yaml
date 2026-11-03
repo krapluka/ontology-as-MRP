@@ -1,0 +1,30 @@
+id: revise-after-late-expedite
+category: revise
+profile: supply-risk
+subject: { model: sale.order, id: 1 }
+records:
+  - { model: sale.order, id: 1, fields: { name: S00001, commitment_date: "2027-03-16T00:00:00", order_line: "[10]" } }
+  - { model: sale.order.line, id: 10, fields: { product_id: "[100]", product_uom_qty: "10" } }
+  - { model: product.product, id: 100, fields: { name: Cargo Bike } }
+  - { model: product.product, id: 101, fields: { name: Battery Pack } }
+  - { model: mrp.bom, id: 20, fields: { product_id: "[100]", bom_line_ids: "[21]" } }
+  - { model: mrp.bom.line, id: 21, fields: { product_id: "[101]", product_qty: "1" } }
+  - { model: stock.quant, id: 30, fields: { product_id: "[101]", quantity: "0" } }
+  - { model: purchase.order.line, id: 40, fields: { product_id: "[101]", product_qty: "10", date_planned: "2027-04-09T08:00:00" } }
+  - { model: purchase.order, id: 41, fields: { name: P00041, order_line: "[40]", state: purchase } }
+  - { model: stock.picking, id: 42, fields: { scheduled_date: "2027-04-09T08:00:00", purchase_id: "[41]", state: assigned } }
+tried:
+  - actions:
+      - { action_type: expedite_po, target: { model: purchase.order.line, id: 40 }, params: { new_date: "2027-03-20 08:00:00" } }
+    rank_key: "00001:000000000000000.000:000000020893:000000000000:00001:000000000000010.000:0000000000000.00"
+expect:
+  outcome: plan
+  metrics:
+    risk_left: { at_most: 0 }
+reference:
+  actions:
+    - { action_type: expedite_po, target: { model: purchase.order.line, id: 40 }, params: { new_date: "2027-03-12 08:00:00" } }
+notes: >
+  As late-inbound-single-line, after one attempt: the line was moved to 20 March, which is
+  still after the promise of 16 March, so nothing cleared. The next plan must be a different
+  one and must clear the shortfall.

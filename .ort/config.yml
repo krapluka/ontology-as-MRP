@@ -1,0 +1,28 @@
+# ORT (OSS Review Toolkit) tool configuration for local + CI SBOM scans.
+# Consumed via `-c /project/.ort/config.yml`. Keys are camelCase (matching the
+# `-P ort.analyzer.*` CLI options). See docs/sbom/README.md.
+ort:
+  analyzer:
+    # Cargo.lock is committed, but workspace path deps and the frontend's npm deps
+    # (apps/frontend) resolve to version ranges. Allow them so analysis never
+    # hard-fails on a range.
+    allowDynamicVersions: true
+    # Honour the scope excludes in .ort.yml (dev/test/build) up front.
+    skipExcluded: true
+    # The ecosystems this repo uses: Cargo (the Rust workspace), NPM (apps/frontend,
+    # resolved from its committed package-lock.json) and PIP (the cognition runtime
+    # image, resolved from apps/hayhooks' hash-locked requirements.txt).
+    # PNPM/Yarn stay enabled so a future JS package in either is picked up with no
+    # command change.
+    enabledPackageManagers:
+      - Cargo
+      - NPM
+      - PIP
+      - PNPM
+      - Yarn
+    packageManagers:
+      PIP:
+        options:
+          # Resolve the runtime's lock for the Python the image runs (apps/hayhooks/Dockerfile).
+          pythonVersion: "3.12"
+          operatingSystem: "linux"

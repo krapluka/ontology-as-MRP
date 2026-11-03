@@ -1,0 +1,75 @@
+[package]
+name = "ekg-cognition"
+description = "Cognition boundary: provider-neutral OpenAI-compatible access via Hayhooks. Owns the CognitionProvider driver and the bounded proposal agent."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+# The neutral contract: the CognitionProvider and Proposer seams, and the grounding and
+# proposal types.
+ekg-domain = { workspace = true }
+# OpenAI-compatible boundary on a maintained client: async-openai with a custom API base,
+# so OpenRouter, Ollama or vLLM stay swappable by configuration and no vendor is named.
+# Only the chat-completion + embedding groups and the Tower `middleware` (its
+# OpenAIRetryLayer) are enabled, with `byot` so requests and replies stay plain JSON
+# (lenient across OpenAI-compatible servers). Default features are off so its TLS choice
+# (reqwest's aws-lc-rs provider, OpenSSL-licensed) is not pulled in.
+async-openai = { version = "0.42", default-features = false, features = ["chat-completion", "embedding", "middleware", "byot"] }
+# The HTTP transport async-openai drives. TLS is rustls over the OS trust store
+# (rustls-platform-verifier), with the ring crypto provider installed explicitly: the
+# ring stack the workspace already carries, and no MPL-2.0 webpki-roots bundle. http://
+# endpoints (Ollama, local Hayhooks) work too.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# The Tower stack around the transport: the header timeout.
+tower = { version = "0.5", features = ["timeout", "util"] }
+# The process-wide generation permits, the idle / total stream bounds, and the
+# per-call trace context (a task-local, which needs `rt`).
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+# Random W3C trace ids for the `traceparent` every call carries.
+getrandom = "0.4"
+futures = "0.3"
+# Rebuilding a normalized rate-limit response for the retry layer.
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Parse the eval set's case files, on the YAML parser the data contract already uses.
+serde-saphyr = "1.3"
+# Dyn-safe async impls of the CognitionProvider / Proposer seams.
+async-trait = "0.1"
+# The agent tool gateway: the official Rust MCP SDK, serving streamable HTTP as a Tower
+# service. A hand-written `ServerHandler` (tools are registered at runtime), so no macros;
+# no `auth` or client features in the normal build.
+rmcp = { version = "3.5", default-features = false, features = ["server", "transport-streamable-http-server", "tower"] }
+# The gateway's router and bearer middleware; the backend serves it (same axum as `/api`).
+axum = { version = "0.8", default-features = false }
+# Task tokens: HMAC-SHA256 over unpadded base64url claims. `hmac` and `sha2` share a `digest`
+# version, so they are bumped together.
+hmac = "0.13"
+sha2 = "0.11"
+base64 = "0.23"
+# Spans through the global tracer, which does nothing until a binary installs a provider.
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+# The W3C trace-context propagator and its header carriers, to read and write `traceparent`.
+# No exporter and no processor is built here: that is the binaries'.
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry-http = { version = "0.33", default-features = false }
+
+[dev-dependencies]
+ekg-domain = { workspace = true, features = ["test-support"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
+# The gated runtime contract suite starts the built runtime image, on the same version the
+# backend's gated suites use.
+testcontainers = "0.28"
+# The gateway suites serve the router in-process and drive it as an MCP client over plain
+# http:// (no TLS provider needed).
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "json"] }
+rmcp = { version = "3.5", default-features = false, features = ["client", "transport-streamable-http-client-reqwest", "reqwest-tls-no-provider"] }
+# An in-memory span exporter, to assert what a traced operation exports.
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "testing"] }
+
+[lints]
+workspace = true

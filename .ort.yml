@@ -1,0 +1,14 @@
+# ORT repository configuration (analyzer input dir = repo root). Scope excludes
+# so the SBOM reflects what SHIPS, not dev/test/build-only dependencies.
+# See docs/sbom/README.md and .ort/config.yml.
+excludes:
+  scopes:
+    - pattern: "dev-dependencies"
+      reason: "DEV_DEPENDENCY_OF"
+      comment: "Cargo dev-only dependencies are not distributed."
+    - pattern: "build-dependencies"
+      reason: "BUILD_DEPENDENCY_OF"
+      comment: "Cargo build-time dependencies are not part of the shipped artifact."
+    - pattern: "devDependencies"
+      reason: "DEV_DEPENDENCY_OF"
+      comment: "npm dev-only dependencies (the apps/frontend toolchain: Vite, Storybook, ESLint, Vitest, codegen) are not shipped."

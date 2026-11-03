@@ -1,0 +1,45 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Environment (never commit real secrets; keep the template)
+.env*
+!.env.example
+.envrc
+
+# Local substrate durable data (legacy hostPath; now podman named volumes)
+/deploy/podman/local/.data/
+
+# Generated artifacts
+/.artifacts/
+# Written by `just changelog` (git-cliff)
+CHANGELOG.md
+
+# ORT SBOM output under docs/sbom/ is generated (docs/ is otherwise tracked and
+# ships). Track only the human-readable report and the README; ignore the
+# machine formats, the per-project tree, and the ORT working dir.
+/docs/sbom/*
+!/docs/sbom/report.html
+!/docs/sbom/README.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs & temp
+*.log
+.tmp/
+.cache/
+
+# Local credentials & certs
+*.pem
+*.key
+*.crt
+.cargo/credentials
+.cargo/credentials.toml
+# GraphDB license (per-machine credential; obtain from Ontotext)
+/deploy/podman/local/graphdb.license

@@ -1,0 +1,13 @@
+# Display input: the currency of the purchase order a plan's cost target touches (the order
+# itself, or the order a line belongs to), as its ISO code. `<urn:ekg:subject>` is replaced
+# only with an IRI rebuilt by `ontology::canonical_subject`.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?currency
+WHERE {
+    { <urn:ekg:subject> ekg:in_currency ?c }
+    UNION
+    { ?po ekg:has_po_line <urn:ekg:subject> ; ekg:in_currency ?c }
+    ?c ekg:currency_code ?currency .
+}

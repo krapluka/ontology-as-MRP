@@ -1,0 +1,35 @@
+#!/bin/sh
+# Installed as /docker-entrypoint.d/16-ekg-proxy-env.envsh (see Dockerfile). Derives and checks
+# the environment the nginx template needs. The stock /docker-entrypoint.sh sources `*.envsh`
+# files in `sort -V` order, so the exports below reach the later
+# `20-envsubst-on-templates.sh`; hence the `16-` prefix. Any failure exits the entrypoint
+# non-zero: the container refuses to start rather than run a broken proxy.
+
+ekg_env_fail() {
+  echo "16-ekg-proxy-env.envsh: ERROR: $*" >&2
+  exit 1
+}
+
+# NGINX_RESOLVER: the DNS server nginx uses to resolve EKG_API_UPSTREAM per request (so a
+# recreated backend is found again without restarting the UI). Defaults to the container's
+# first /etc/resolv.conf nameserver (podman's network DNS). An IPv6 address is bracketed as
+# nginx's `resolver` directive requires. An explicit NGINX_RESOLVER wins.
+if [ -z "${NGINX_RESOLVER:-}" ]; then
+  NGINX_RESOLVER=$(awk '$1 == "nameserver" { if ($2 ~ ":") print "[" $2 "]"; else print $2; exit }' /etc/resolv.conf 2>/dev/null)
+  [ -n "$NGINX_RESOLVER" ] ||
+    ekg_env_fail "no nameserver in /etc/resolv.conf; set NGINX_RESOLVER to the DNS server nginx should use"
+fi
+export NGINX_RESOLVER
+
+# EKG_API_UPSTREAM must be scheme://host[:port] with no path: `proxy_pass` with a variable
+# replaces the whole request URI by any path it carries, so a trailing "/" would send every
+# /api/... request to "/".
+case "${EKG_API_UPSTREAM:-}" in
+  http://*|https://*) ;;
+  *) ekg_env_fail "EKG_API_UPSTREAM must be http(s)://host[:port], got '${EKG_API_UPSTREAM:-}'" ;;
+esac
+case "${EKG_API_UPSTREAM#*://}" in
+  */*|*\?*|'') ekg_env_fail "EKG_API_UPSTREAM must carry no path, query or trailing '/', got '${EKG_API_UPSTREAM}'" ;;
+esac
+
+echo "16-ekg-proxy-env.envsh: nginx resolver ${NGINX_RESOLVER}, API upstream ${EKG_API_UPSTREAM}"

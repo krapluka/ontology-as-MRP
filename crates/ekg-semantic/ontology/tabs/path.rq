@@ -1,0 +1,92 @@
+# Tab input: the selected point's rule-independent path.
+#
+# `<urn:ekg:subject>` is replaced only with an IRI `ontology::canonical_subject` rebuilt. One
+# row per candidate hop entity, tagged by ?hop; `ekg_semantic::tabs` keeps one per hop
+# (lowest IRI), so the chain is deterministic:
+#
+#   order:    the subject sales order, or the order a manufacturing-order subject fulfils;
+#   customer: that order's customer;
+#   product:  its line products;
+#   bom:      the BOMs producing them, with ?of = the product each produces, so the kept
+#             BOM is the one producing the kept product (a multi-line order stays connected);
+#   mo:       the open (not done or cancelled) manufacturing orders fulfilling the order, the
+#             ones Flow draws as in production, with ?of = the product each builds, so the
+#             kept MO builds the kept product. A done backorder or split MO copies the origin
+#             too, and without the filter would light an MO that Flow never shows;
+#   self_mo:  a manufacturing-order subject itself (its MO hop is the subject), with ?of = the
+#             product it builds: when that is one of the order's line products, it is the
+#             product hop, so a process point lights the product it builds;
+#   self_bom: the BOM that subject builds from, with ?of = the product the BOM produces.
+#
+# The cause-dependent hops (component, supplier, purchase order) come from path-causes.rq.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT DISTINCT ?hop ?entity ?of
+WHERE {
+    {
+        {
+            SELECT ?order WHERE {
+                {
+                    <urn:ekg:subject> a ekg:SalesOrder .
+                    BIND(<urn:ekg:subject> AS ?order)
+                }
+                UNION
+                {
+                    <urn:ekg:subject> a ekg:ManufacturingOrder ;
+                                      ekg:fulfills ?order .
+                    ?order a ekg:SalesOrder .
+                }
+            }
+        }
+        {
+            BIND("order" AS ?hop)
+            ?order a ekg:SalesOrder .
+            BIND(?order AS ?entity)
+        }
+        UNION
+        {
+            BIND("customer" AS ?hop)
+            ?order ekg:for_customer ?entity .
+        }
+        UNION
+        {
+            BIND("product" AS ?hop)
+            ?order ekg:has_line_of ?productLine .
+            ?productLine ekg:line_product ?entity .
+        }
+        UNION
+        {
+            BIND("bom" AS ?hop)
+            ?order ekg:has_line_of ?bomLine .
+            ?bomLine ekg:line_product ?bomProduct .
+            ?entity a ekg:BOM ;
+                    ekg:produces_product ?bomProduct .
+            BIND(?bomProduct AS ?of)
+        }
+        UNION
+        {
+            BIND("mo" AS ?hop)
+            ?entity a ekg:ManufacturingOrder ;
+                    ekg:fulfills ?order .
+            OPTIONAL { ?entity ekg:lifecycle_state ?moState }
+            FILTER(!BOUND(?moState) || (?moState != "done" && ?moState != "cancel"))
+            OPTIONAL { ?entity ekg:produced ?of }
+        }
+    }
+    UNION
+    {
+        BIND("self_mo" AS ?hop)
+        <urn:ekg:subject> a ekg:ManufacturingOrder .
+        BIND(<urn:ekg:subject> AS ?entity)
+        OPTIONAL { <urn:ekg:subject> ekg:produced ?of }
+    }
+    UNION
+    {
+        BIND("self_bom" AS ?hop)
+        <urn:ekg:subject> a ekg:ManufacturingOrder ;
+                          ekg:builds_from ?entity .
+        ?entity ekg:produces_product ?of .
+    }
+}
+ORDER BY ?hop ?entity ?of

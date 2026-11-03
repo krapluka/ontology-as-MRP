@@ -1,0 +1,16 @@
+# Tab input (not served rows): every sourcing link as (supplier, component, sequence), with
+# the lowest `sequence` over a supplier's links for that component. `ekg_semantic::tabs` ranks
+# them per component into the sourcing role (single / primary / backup) for Flow's supplier
+# tiles and the Suppliers tab, and joins them with the cause map for exposure.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?supplier ?component (MIN(?linkSequence) AS ?sequence)
+WHERE {
+    ?link a ekg:SupplierLink ;
+          ekg:supplied_by      ?supplier ;
+          ekg:supplies_product ?component .
+    OPTIONAL { ?link ekg:sequence ?linkSequence }
+}
+GROUP BY ?supplier ?component
+ORDER BY ?component ?supplier

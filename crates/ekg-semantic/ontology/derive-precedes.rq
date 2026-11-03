@@ -1,0 +1,33 @@
+#
+# Derive ekg:precedes between consecutive operations of a BOM.
+#
+# Odoo routing operations carry an ordering (ekg:op_sequence) but no native
+# "next operation" edge. This SPARQL UPDATE materializes ekg:precedes from that
+# sequence. It runs in the provisioning path, not as a monitor or drift rule.
+#
+# The derived edges live in their own overlay graph, which is cleared before each
+# re-derivation. An operation that was retracted since the last run (its data graph
+# dropped, so it lost its type) therefore leaves no stale precedes edge behind.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+CLEAR SILENT GRAPH <https://ekg.example/graph/derived/precedes> ;
+
+INSERT {
+    GRAPH <https://ekg.example/graph/derived/precedes> { ?a ekg:precedes ?b }
+}
+WHERE {
+    ?a a ekg:Operation ;
+       ekg:operation_of ?bom ;
+       ekg:op_sequence ?sa .
+    ?b a ekg:Operation ;
+       ekg:operation_of ?bom ;
+       ekg:op_sequence ?sb .
+    FILTER(?sa < ?sb)
+    FILTER NOT EXISTS {
+        ?c a ekg:Operation ;
+           ekg:operation_of ?bom ;
+           ekg:op_sequence ?sc .
+        FILTER(?sa < ?sc && ?sc < ?sb)
+    }
+}

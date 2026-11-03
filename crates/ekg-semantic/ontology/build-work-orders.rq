@@ -1,0 +1,14 @@
+# Every build's work orders with their planned windows, and the sales order the build fulfils
+# when it has one. A plan rule reads it to see what a moved work order has to wait for.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?wo ?order ?so ?start ?end
+WHERE {
+    ?wo a ekg:WorkOrder ;
+        ekg:part_of ?order ;
+        ekg:startedAt ?start .
+    OPTIONAL { ?wo ekg:endedAt ?end }
+    OPTIONAL { ?order ekg:fulfills ?so }
+}
+ORDER BY ?order ?start ?wo

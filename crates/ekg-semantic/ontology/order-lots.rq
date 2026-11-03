@@ -1,0 +1,62 @@
+# Delivery judgment input: the manufacturing lots that fulfil each sales order, with each
+# lot's quantity and planned window and, per component of the lot's own product tree, the
+# per-unit requirement and the component's on-hand stock.
+#
+# `ekg_semantic::display` allocates each component's on-hand plus its open inbound (from
+# `coverage.rq`, in arrival order) to the order's lots in the order of their planned start,
+# to judge each lot's completion and the order's late units. An order with no lot returns no
+# row and is judged by demand coverage instead.
+#
+#   * ?perUnit: the component's first-order roll-up over the lot's produced product's own
+#               BOM tree: the sum of BOM-line quantity over each (tree, BOM line) once. The
+#               risk rule's roll-up pattern, per unit instead of per order line.
+#   * ?onHand:  the component's stock, summed (unallocated across orders, as the rule does).
+#   * ?woEnd:   the latest planned end over the lot's own work orders (unbound without any).
+#               A lot's planned finish is the later of ?end and ?woEnd, so a work order moved
+#               past the order's own finish moves the lot with it.
+#
+# The component part is OPTIONAL, so a lot whose product has no BOM still returns its row
+# (it waits for no material). A cancelled lot will produce nothing and is excluded.
+# The order marker is empty (every order) or a one-order VALUES block on the order, whose IRI
+# is rebuilt by `ontology::canonical_subject`.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT ?so ?mo ?qty ?start ?end ?comp ?perUnit ?onHand ?woEnd
+WHERE {
+    {{ORDERS}}
+    ?mo a ekg:ManufacturingOrder ;
+        ekg:fulfills    ?so ;
+        ekg:product_qty ?qty ;
+        ekg:startedAt   ?start ;
+        ekg:endedAt     ?end ;
+        ekg:produced    ?finished .
+    FILTER NOT EXISTS { ?mo ekg:lifecycle_state "cancel" }
+    OPTIONAL {
+        SELECT ?mo (MAX(?anyWoEnd) AS ?woEnd) WHERE {
+            ?wo ekg:part_of ?mo ;
+                ekg:endedAt ?anyWoEnd .
+        } GROUP BY ?mo
+    }
+    OPTIONAL {
+        {
+            SELECT ?finished ?comp (SUM(?compQty) AS ?perUnit) WHERE {
+                SELECT DISTINCT ?finished ?cline ?comp ?compQty WHERE {
+                    ?finished (^ekg:produces_product/ekg:has_line/ekg:component_product)* ?parent .
+                    ?pbom ekg:produces_product ?parent ;
+                          ekg:has_line         ?cline .
+                    ?cline ekg:component_product ?comp ;
+                           ekg:product_qty       ?compQty .
+                }
+            } GROUP BY ?finished ?comp
+        }
+        OPTIONAL {
+            SELECT ?comp (SUM(?q) AS ?onHand) WHERE {
+                ?sl a ekg:StockLevel ;
+                    ekg:stock_of ?comp ;
+                    ekg:quantity ?q .
+            } GROUP BY ?comp
+        }
+    }
+}
+ORDER BY ?so ?start ?mo ?comp

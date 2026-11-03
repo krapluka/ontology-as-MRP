@@ -1,0 +1,393 @@
+# Local substrate for the Enterprise Knowledge Graph demonstrator (Podman).
+# Start with: `just podman-local-up`.
+services:
+  graphdb:                       # Semantic layer: RDF/OWL triple store + KG viz
+    image: docker.io/ontotext/graphdb:11.3.0
+    environment:
+      # GraphDB 11 requires a license even for the free tier; a file-based license
+      # is read at boot and takes priority over a Workbench upload (so the
+      # substrate is reproducible). Obtain the file from Ontotext and drop it at
+      # deploy/podman/local/graphdb.license (gitignored: it is a credential).
+      GDB_JAVA_OPTS: "-Dgraphdb.license.file=/opt/graphdb/graphdb.license"
+      GDB_HEAP_SIZE: 4g
+    ports:
+      - "7200:7200"
+    volumes:
+      - graphdb-data:/opt/graphdb/home
+      # Mounted outside the home volume so the license is not persisted into the
+      # data volume; read-only because the container never writes it.
+      - ./graphdb.license:/opt/graphdb/graphdb.license:ro
+
+  restate:                       # Dynamic layer: durable execution runtime
+    # Pinned: `latest` can move under the stack. restate-sdk 0.12 needs Restate 1.7+; the
+    # image also ships the `restate` CLI the agent recipes run inside the container.
+    image: docker.io/restatedev/restate:1.7.10
+    environment:
+      # Stable node name so the persisted volume resumes across container
+      # recreation. Without it Restate derives the name from the (changing)
+      # container hostname and refuses to start on existing data (RT0002).
+      RESTATE_NODE_NAME: restate-local
+    ports:
+      - "8080:8080"              # ingress
+      - "9070:9070"              # admin
+    volumes:
+      - restate-data:/restate-data
+
+  nats:                          # Dynamic layer: durable RDF-change event backbone (JetStream)
+    image: docker.io/library/nats:2.10.22-alpine
+    # Enable JetStream (-js) with a file store on a named volume so the EKG_RDF
+    # stream and the monitor's durable consumer survive a restart.
+    # `-m 8222` serves the read-only monitoring endpoint: scripts/wait-settled.sh reads the
+    # monitor bridge's consumer backlog from /jsz.
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "4222:4222"              # client protocol (the backend's NATS_URL)
+      - "8222:8222"              # monitoring (read-only; the settle check)
+    volumes:
+      - nats-data:/data
+
+  qdrant:                        # Read model: non-authoritative vector projection
+    image: docker.io/qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"              # REST API (the backend's QDRANT_URL)
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  postgres:                      # Odoo's backing database (not our governed truth)
+    image: docker.io/library/postgres:16.15-alpine3.23
+    env_file:
+      - ./app.defaults.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # `$$` is resolved inside the container from app.defaults.env, so custom creds work.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  odoo-init:                     # One-shot: install base + the supply-risk apps, then exit
+    image: docker.io/library/odoo:19.0-20260908
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./app.defaults.env
+    # Pass DB connection flags explicitly: the `sh -c` wrapper bypasses the image
+    # entrypoint's HOST/USER/PASSWORD to --db_* injection (that only fires when the
+    # command starts with `odoo`/`-`), so without these Odoo falls back to a local
+    # socket and fails. With them, a re-run against an already-installed DB is a
+    # no-op (`-i` skips already-installed modules).
+    #
+    # Install the app modules the seed needs: a `podman-local-wipe` deletes the
+    # odoo-data volume, so a cold DB has only `base`; without these the seed fails
+    # on external ids like `uom.product_uom_unit`. sale_management/purchase/mrp/
+    # purchase_stock transitively pull in sale, stock, product, uom.
+    command:
+      - "sh"
+      - "-c"
+      - 'exec odoo -d "$$POSTGRES_DB" --db_host="$$HOST" --db_port=5432 --db_user="$$USER" --db_password="$$PASSWORD" -i base,sale_management,purchase,mrp,purchase_stock --without-demo=all --stop-after-init'
+    restart: "no"
+    volumes:
+      - odoo-data:/var/lib/odoo
+
+  odoo:                          # Source system
+    image: docker.io/library/odoo:19.0-20260908
+    depends_on:
+      odoo-init:
+        condition: service_completed_successfully
+    env_file:
+      - ./app.defaults.env
+    ports:
+      - "8069:8069"
+    volumes:
+      - odoo-data:/var/lib/odoo
+
+  hayhooks:                      # Cognition runtime: Haystack pipelines served as REST
+    # Consumes the image built by `just podman-build` from apps/hayhooks/Dockerfile:
+    # hash-locked dependencies with the pipelines baked in, so no bind mount. Behind the
+    # `backend` profile like the engine that calls it: it is started with the backend
+    # once the images exist, and a bare `podman compose up -d` stays substrate-only.
+    image: localhost/ekg-hayhooks:local
+    profiles: ["backend"]
+    environment:
+      # The provider credential lives here only; the engine reaches the runtime without it.
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://openrouter.ai/api/v1}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      CHAT_MODEL: ${CHAT_MODEL:-openai/gpt-oss-120b}
+      EMBED_BASE_URL: ${EMBED_BASE_URL:-}
+      EMBED_API_KEY: ${EMBED_API_KEY:-}
+      EMBED_MODEL: ${EMBED_MODEL:-qwen/qwen3-embedding-8b}
+      # The `agent` pipeline: its model and key fall back to
+      # CHAT_MODEL / MODEL_API_KEY (a separate key can carry its own provider spend limit). It
+      # reads the world model and skills only through the engine's tool gateway, at this URL,
+      # which is runtime configuration, never taken from a request.
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      AGENT_MODEL_API_KEY: ${AGENT_MODEL_API_KEY:-}
+      EKG_TOOL_GATEWAY_URL: http://ekg-backend:8091
+      # Live mode only: the engine's Restate journal stays the one durable record.
+      HAYHOOKS_DURABLE_MODE: "false"
+      # The runtime's own limit per provider call, at or above the engine's total cap
+      # (EKG_COGNITION_TOTAL_TIMEOUT_SECS, 120 by default), so the engine decides.
+      PROVIDER_TIMEOUT_SECS: ${PROVIDER_TIMEOUT_SECS:-150}
+      # Telemetry is off until an OTLP endpoint is set (the `telemetry` profile's Langfuse, or
+      # another OTLP backend). Spans continue the engine's `traceparent` and never carry
+      # prompt or answer text. Inside this network the endpoint is a service name, so
+      # EKG_TELEMETRY_STACK_ENDPOINT wins over the host's OTEL_EXPORTER_OTLP_ENDPOINT. Over
+      # HTTP, as the engine exports: Langfuse takes no gRPC.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${EKG_TELEMETRY_STACK_ENDPOINT:-${OTEL_EXPORTER_OTLP_ENDPOINT:-}}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: ekg-cognition-runtime
+      HAYSTACK_CONTENT_TRACING_ENABLED: "false"
+    ports:
+      - "1416:1416"
+    healthcheck:
+      # The slim image has no curl; Python is there. Shell form: the exec form's argument
+      # is split at spaces on its way through the compose provider.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:1416/status', timeout=4)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  ekg-backend:                   # Engine: the governed /api surface + durable Restate worker
+    # Consumes the image built by `just podman-build` from apps/backend/Dockerfile
+    # (no inline `build:`, so building and running stay separated). Behind the
+    # `backend` profile so a bare `podman compose up -d` brings up the substrate
+    # only: the backend can boot only once Odoo has a minted key and the GraphDB
+    # `ekg` repo exists (both produced by scripts/podman-local-up.sh after up), so
+    # the script starts it last with `--profile backend up -d ekg-backend`.
+    image: localhost/ekg-backend:local
+    profiles: ["backend"]
+    depends_on:
+      - graphdb
+      - restate
+      - nats
+      - qdrant
+      - odoo
+      - hayhooks
+    # Secrets + tunables (EKG_WEBHOOK_SECRET, ODOO_API_KEY, model keys) come from the
+    # repo-root .env; the `environment:` block below overrides the substrate URLs so
+    # the same .env (localhost URLs the host seed/provision tools use) drives both.
+    env_file:
+      - ../../../.env
+    environment:
+      # Substrate reached over the compose network (service DNS), not localhost.
+      GRAPHDB_URL: http://graphdb:7200
+      ODOO_URL: http://odoo:8069
+      RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_ADMIN_URL: http://restate:9070
+      NATS_URL: nats://nats:4222
+      QDRANT_URL: http://qdrant:6333
+      EKG_EVENT_BUS: nats
+      # Cognition goes through the runtime; the provider key is blanked here
+      # (overriding the repo .env) because only the runtime holds it.
+      EKG_COGNITION_ROUTE: runtime
+      HAYHOOKS_URL: http://hayhooks:1416
+      # Trace export, off until an endpoint is set. The same rule as the runtime's: inside
+      # this network the endpoint is a service name.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${EKG_TELEMETRY_STACK_ENDPOINT:-${OTEL_EXPORTER_OTLP_ENDPOINT:-}}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      MODEL_API_KEY: ""
+      # The URL Restate (a peer on this network) dials the SDK endpoint back at.
+      EKG_SERVICE_CALLBACK_URL: http://ekg-backend:9080
+      # The provisioning script triggers the first sweep after it registers the
+      # deployment, so the backend must not fire a pre-registration sweep (a 404).
+      EKG_SWEEP_BOOTSTRAP: "false"
+      # The local demo auto-apply policy: the starter cases show
+      # both oversight paths. `:-` also replaces an empty value from .env; set a value
+      # naming no verb (e.g. EKG_AUTOPROMOTE_ACTIONS=none) to gate every plan. The
+      # backend's own default stays empty, so every plan is human-gated.
+      EKG_AUTOPROMOTE_ACTIONS: ${EKG_AUTOPROMOTE_ACTIONS:-expedite_po,notify_owner}
+      EKG_AUTOPROMOTE_COST_LIMIT: ${EKG_AUTOPROMOTE_COST_LIMIT:-250}
+      EKG_AUTOPROMOTE_COST_LIMIT_CURRENCY: ${EKG_AUTOPROMOTE_COST_LIMIT_CURRENCY:-USD}
+      # The agent tool gateway: its own internal listener, never part of /api.
+      # Hayhooks reaches it at http://ekg-backend:8091/mcp; EKG_TOOL_TOKEN_SECRET comes
+      # from the repo .env (ensured by scripts/podman-local-up.sh).
+      EKG_TOOL_GATEWAY_PORT: "8091"
+    ports:
+      - "8090:8090"              # public /api published for host-run e2e tests
+      - "127.0.0.1:8091:8091"    # agent tool gateway, loopback only, for host tests
+      # 9080 (Restate SDK endpoint) need not be host-published: the callback is
+      # ekg-backend:9080 on the compose network.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  frontend:                      # Operator UI, its own service
+    # nginx serves the built React bundle and reverse-proxies /api to ekg-backend over the
+    # compose network; the backend never serves these assets. Consumes the image built by
+    # `just podman-build` (apps/frontend/Dockerfile, localhost/ekg-frontend:local). Behind
+    # the `frontend` profile and built separately (like ekg-backend), so a bare
+    # `podman compose up -d` brings up the substrate only; scripts/podman-local-up.sh starts
+    # it after the backend is ready. `just podman-local-down` / `-wipe` pass
+    # `--profile frontend` too.
+    image: localhost/ekg-frontend:local
+    profiles: ["frontend"]
+    environment:
+      # The API upstream nginx proxies /api to, over the compose network (service DNS).
+      EKG_API_UPSTREAM: http://ekg-backend:8090
+    ports:
+      - "3000:8080"              # the operator UI on the host (unprivileged nginx listens on 8080)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+# Podman-managed named volumes, no host ./.data/ folders. Data persists across
+# restarts; wipe one with `podman volume rm local_<name>` (e.g. local_restate-data).
+  # --- Trace backend (opt-in): `just telemetry-up` -------------------------------------
+  # Langfuse and the stores it needs, behind the `telemetry` profile: nothing here starts
+  # with the stack. A read model: the engine sends traces to it and reads nothing back.
+  # The credentials below are local-only defaults; none of these stores is published on
+  # the host.
+
+  langfuse-web:                  # The UI and the OTLP endpoint (/api/public/otel)
+    image: docker.io/langfuse/langfuse:4.54.0
+    profiles: ["telemetry"]
+    depends_on: &langfuse-stores
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-cache:
+        condition: service_healthy
+      langfuse-objects:
+        condition: service_healthy
+    ports:
+      - "${LANGFUSE_PORT:-3010}:3000"   # 3000 on the host is the operator UI
+    environment: &langfuse-env
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3010}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-local-only-nextauth-secret}
+      SALT: ${LANGFUSE_SALT:-local-only-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: "false"
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-cache
+      REDIS_PORT: "6379"
+      REDIS_AUTH: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: langfuse-objects
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-objects:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: langfuse-objects
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-objects:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      # Headless setup: an organization, a project and its keys exist before the first
+      # trace, so nothing has to be clicked. `just telemetry-up` prints the OTLP settings
+      # these keys make.
+      LANGFUSE_INIT_ORG_ID: ekg-local
+      LANGFUSE_INIT_ORG_NAME: EKG local
+      LANGFUSE_INIT_PROJECT_ID: ekg-local
+      LANGFUSE_INIT_PROJECT_NAME: ekg
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-ekg-local}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-ekg-local}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_USER_EMAIL:-operator@ekg.local}
+      LANGFUSE_INIT_USER_NAME: operator
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_USER_PASSWORD:-ekg-local-only}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/public/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  langfuse-worker:               # Ingests what the web service queued into ClickHouse
+    image: docker.io/langfuse/langfuse-worker:4.54.0
+    profiles: ["telemetry"]
+    depends_on: *langfuse-stores
+    environment: *langfuse-env
+
+  langfuse-postgres:             # Langfuse's own database (the stack's Postgres backs Odoo only)
+    image: docker.io/library/postgres:16.15-alpine3.23
+    profiles: ["telemetry"]
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-clickhouse:           # Traces and observations
+    image: docker.io/clickhouse/clickhouse-server:25.12.11.4-alpine
+    profiles: ["telemetry"]
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  langfuse-cache:                # The ingestion queue (Redis protocol; Valkey, BSD-3-Clause)
+    image: docker.io/valkey/valkey:8.1.10-alpine
+    profiles: ["telemetry"]
+    command: ["valkey-server", "--requirepass", "langfuse", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - langfuse-cache-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a langfuse --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-objects:              # S3-compatible store for raw events (MinIO, AGPL-3.0, unmodified)
+    # Chainguard publishes this image under `latest` only, so it is pinned by digest.
+    image: cgr.dev/chainguard/minio@sha256:32f9a1bd6ef5550c0f9da0e8711d647fae321f47c88b61fedc0e2c09d4df8a83
+    profiles: ["telemetry"]
+    entrypoint: sh
+    # Create the bucket before the server starts.
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" /data'
+    environment:
+      MINIO_ROOT_USER: langfuse
+      MINIO_ROOT_PASSWORD: langfuse-objects
+    volumes:
+      - langfuse-objects-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 2s
+
+volumes:
+  graphdb-data:
+  restate-data:
+  nats-data:
+  qdrant-data:
+  postgres-data:
+  odoo-data:
+  langfuse-postgres-data:
+  langfuse-clickhouse-data:
+  langfuse-cache-data:
+  langfuse-objects-data:

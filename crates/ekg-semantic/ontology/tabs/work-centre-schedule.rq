@@ -1,0 +1,14 @@
+# Proposer input: the work orders scheduled on one work centre, whichever order they belong
+# to. Identifiers only: the agent's `list_work_centre_schedule` tool grounds each one under the
+# scheduler's read context, so every fact it sees passes the read policy and its omissions are
+# disclosed. The subject placeholder is replaced only with an IRI
+# `ontology::canonical_subject` rebuilt.
+
+PREFIX ekg: <https://ekg.example/ontology#>
+
+SELECT DISTINCT ?entity
+WHERE {
+    ?entity a ekg:WorkOrder ;
+            ekg:performedBy <urn:ekg:subject> .
+}
+ORDER BY ?entity

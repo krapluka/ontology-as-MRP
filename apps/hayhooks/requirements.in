@@ -1,0 +1,8 @@
+# Top-level pins for the cognition runtime image (apps/hayhooks/Dockerfile).
+# Edit here, then regenerate the hash-locked requirements.txt with `just hayhooks-lock`.
+# The image is the versioned unit.
+hayhooks[tracing]==2.0.0
+haystack-ai==3.3.0
+# The MCP client an agent reads the engine's tool gateway through, with a per-task bearer
+# token. Used by the `agent` pipeline.
+mcp-haystack==1.5.1

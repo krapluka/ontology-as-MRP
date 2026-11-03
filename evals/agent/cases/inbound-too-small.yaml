@@ -1,0 +1,25 @@
+id: inbound-too-small
+category: unrecoverable_inbound
+profile: supply-risk
+subject: { model: sale.order, id: 1 }
+records:
+  - { model: sale.order, id: 1, fields: { name: S00001, commitment_date: "2027-03-16T00:00:00", order_line: "[10]" } }
+  - { model: sale.order.line, id: 10, fields: { product_id: "[100]", product_uom_qty: "10" } }
+  - { model: product.product, id: 100, fields: { name: Cargo Bike } }
+  - { model: product.product, id: 101, fields: { name: Battery Pack } }
+  - { model: mrp.bom, id: 20, fields: { product_id: "[100]", bom_line_ids: "[21]" } }
+  - { model: mrp.bom.line, id: 21, fields: { product_id: "[101]", product_qty: "1" } }
+  - { model: stock.quant, id: 30, fields: { product_id: "[101]", quantity: "0" } }
+  - { model: purchase.order.line, id: 40, fields: { product_id: "[101]", product_qty: "6", date_planned: "2027-04-09T08:00:00" } }
+  - { model: purchase.order, id: 41, fields: { name: P00041, order_line: "[40]", state: purchase } }
+  - { model: stock.picking, id: 42, fields: { scheduled_date: "2027-04-09T08:00:00", purchase_id: "[41]", state: assigned } }
+expect:
+  outcome: plan
+reference:
+  actions:
+    - { action_type: expedite_po, target: { model: purchase.order.line, id: 40 }, params: { new_date: "2027-03-12 08:00:00" } }
+notes: >
+  The only inbound line brings 6 of the 10 Battery Packs the order needs, after the promise.
+  No plan in the catalog covers the order in full. Moving the line's arrival to before the
+  promise leaves a shortfall of 4 instead of 10, which ranks better than doing nothing; that
+  is what a plan must achieve here, so no metric asks for a cleared signal.

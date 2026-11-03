@@ -1,0 +1,304 @@
+/*
+ * Industry design tokens and primitive component classes: the color roles and accent/neutral
+ * ramps, the Barlow / Barlow Condensed type, the spacing scale, the blueprint/corner frame,
+ * and the .btn / .tag / .seg looks. The Barlow faces are self-hosted via `@fontsource`
+ * (imported in main.tsx and the Storybook preview), so the UI makes no third-party request
+ * at runtime (the CSP allows fonts from its own origin only).
+ */
+
+:root {
+  --color-bg: #f2f2f3;
+  --color-surface: #e9e9ea;
+  --color-text: #1d1f20;
+  --color-accent: #5980a6;
+  --color-accent-2: #728fab;
+  --color-divider: color-mix(in srgb, #1d1f20 16%, transparent);
+
+  --color-neutral-100: #f5f5f8;
+  --color-neutral-200: #e7e7ea;
+  --color-neutral-300: #d4d4d7;
+  --color-neutral-400: #b7b7ba;
+  --color-neutral-500: #98989b;
+  --color-neutral-600: #7a7a7d;
+  --color-neutral-700: #5d5d60;
+  --color-neutral-800: #424244;
+  --color-neutral-900: #2b2b2d;
+
+  --color-accent-100: #eef6ff;
+  --color-accent-200: #d6ebff;
+  --color-accent-300: #b5d9fd;
+  --color-accent-400: #94bce3;
+  --color-accent-500: #749dc4;
+  --color-accent-600: #597ea3;
+  --color-accent-700: #416180;
+  --color-accent-800: #2c455d;
+  --color-accent-900: #1d2d3d;
+
+  --font-heading: "Barlow Condensed", system-ui, sans-serif;
+  --font-heading-weight: 600;
+  --font-body: "Barlow", system-ui, sans-serif;
+
+  --space-1: 3.4px;
+  --space-2: 6.8px;
+  --space-3: 10.2px;
+  --space-4: 13.6px;
+  --space-6: 20.4px;
+  --space-8: 27.2px;
+
+  --radius-md: 4px;
+  --radius-lg: 7px;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2b2b2d 14%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2b2b2d 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2b2b2d 22%, transparent);
+
+  /* Late / over-capacity hatch. */
+  --hatch: repeating-linear-gradient(
+    -45deg,
+    var(--color-accent-900) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  margin: 0 0 var(--space-2);
+}
+
+.text-muted {
+  color: var(--color-neutral-700);
+}
+
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+/* A bare, button-reset tab that keeps the keyboard focus ring: resets the UA chrome
+   without touching `outline` (unlike inline `all: unset`), so `:focus-visible` above still
+   shows the indicator on the primary tab nav (WCAG 2.4.7). */
+.pp-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  text-align: inherit;
+}
+/* A bare, unstyled button (option cards, applied rows, toggles): the same visual reset as
+   inline `all: unset` (UA chrome off, typography inherited, inline box) but without touching
+   `outline`, so the `:focus-visible` ring above stays (WCAG 2.4.7). Inline `all: unset` would
+   override it and leave keyboard users with no focus indicator. */
+/* A bordered row or card the operator can pick: on hover its border turns accent-500.
+   `!important` beats the inline border each row sets for its selected state. */
+.pp-hover:hover {
+  border-color: var(--color-accent-500) !important;
+}
+
+.pp-unstyled {
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  text-indent: inherit;
+  text-shadow: inherit;
+  word-spacing: inherit;
+  /* Some UA sheets (e.g. the older Blink sheet jsdom ships) give buttons `align-items:
+     flex-start`; `all: unset` resets it to `normal`. Current Chromium already computes
+     `normal`, so this covers other engines: a column-flex button's rows keep filling it. */
+  align-items: normal;
+  display: inline;
+  box-sizing: content-box;
+}
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+/* --- blueprint frame and registration marks --- */
+.blueprint {
+  position: relative;
+  border: 1px solid var(--color-divider);
+  border-radius: 0;
+}
+.blueprint > .corner {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+.blueprint > .corner::before,
+.blueprint > .corner::after {
+  content: "";
+  position: absolute;
+  background: currentColor;
+}
+.blueprint > .corner::before {
+  left: 5px;
+  top: 0;
+  width: 1px;
+  height: 100%;
+}
+.blueprint > .corner::after {
+  top: 5px;
+  left: 0;
+  width: 100%;
+  height: 1px;
+}
+.blueprint > .corner.tl {
+  top: -6px;
+  left: -6px;
+}
+.blueprint > .corner.tr {
+  top: -6px;
+  right: -6px;
+}
+.blueprint > .corner.bl {
+  bottom: -6px;
+  left: -6px;
+}
+.blueprint > .corner.br {
+  bottom: -6px;
+  right: -6px;
+}
+
+/* --- buttons --- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 14px;
+  line-height: 1.2;
+  color: var(--color-text);
+  background: transparent;
+  border: 1px solid var(--color-divider);
+  border-radius: 0;
+  padding: var(--space-2) calc(var(--space-3) * 1.2);
+}
+.btn svg {
+  display: block;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-primary {
+  /* accent-700, not the base accent: paper text on #5980a6 is 3.71:1, below WCAG AA
+     4.5:1; on accent-700 it is 5.78:1. Hover/active step darker. */
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+  border-color: var(--color-accent-700);
+}
+.btn-primary:hover {
+  background: var(--color-accent-800);
+}
+.btn-primary:active {
+  background: var(--color-accent-900);
+}
+.btn-secondary {
+  border-color: var(--color-divider);
+}
+.btn-secondary:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+.btn-ghost {
+  /* accent-700 text: 5.78:1 on the page vs 3.71:1 for the base accent. */
+  color: var(--color-accent-700);
+  border-color: transparent;
+  padding-inline: var(--space-1);
+}
+.btn-ghost:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+/* --- tags --- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  border-radius: 0;
+}
+.tag-accent {
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+.tag-neutral {
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+}
+.tag-outline {
+  border: 1px solid var(--color-accent);
+  /* accent-700 text for WCAG AA. The border keeps the base accent (non-text: 3.71:1, needs 3:1). */
+  color: var(--color-accent-700);
+}
+
+/* --- segmented control --- */
+.seg {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--color-divider);
+  border-radius: 0;
+}
+.seg-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--color-text);
+  border: 0;
+  font-family: var(--font-body);
+}
+.seg-opt + .seg-opt {
+  border-left: 1px solid var(--color-divider);
+}
+.seg-opt[aria-pressed="true"] {
+  /* accent-700 fill: paper text 5.78:1 vs 3.71:1 on the base accent. */
+  background: var(--color-accent-700);
+  color: var(--color-bg);
+}
+.seg-opt[aria-pressed="false"]:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}

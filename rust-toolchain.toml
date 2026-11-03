@@ -1,0 +1,6 @@
+[toolchain]
+# Pin to stable; the harness targets the current stable toolchain.
+# Swap to an exact version (e.g. "1.90.0") to make CI fully reproducible.
+channel = "stable"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
