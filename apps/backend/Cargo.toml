@@ -75,7 +75,7 @@ async-trait = "0.1"
 # needs no broker. Default features minus `websockets`: we connect over plain nats:// TCP
 # (like the http-only GraphDB/Restate clients), and the websocket transport drags in
 # webpki-roots (CDLA-Permissive-2.0), which the cargo-deny licence check rejects.
-async-nats = { version = "0.51", default-features = false, features = [
+async-nats = { version = "0.52", default-features = false, features = [
     "jetstream",
     "ring",
     "crypto",
