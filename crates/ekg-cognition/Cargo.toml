@@ -17,7 +17,7 @@ ekg-domain = { workspace = true }
 # OpenAIRetryLayer) are enabled, with `byot` so requests and replies stay plain JSON
 # (lenient across OpenAI-compatible servers). Default features are off so its TLS choice
 # (reqwest's aws-lc-rs provider, OpenSSL-licensed) is not pulled in.
-async-openai = { version = "0.42", default-features = false, features = ["chat-completion", "embedding", "middleware", "byot"] }
+async-openai = { version = "0.43", default-features = false, features = ["chat-completion", "embedding", "middleware", "byot"] }
 # The HTTP transport async-openai drives. TLS is rustls over the OS trust store
 # (rustls-platform-verifier), with the ring crypto provider installed explicitly: the
 # ring stack the workspace already carries, and no MPL-2.0 webpki-roots bundle. http://
